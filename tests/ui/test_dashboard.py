@@ -209,3 +209,75 @@ def test_scatter_plot_spacing_for_different_time_units():
     assert (
         label_line_ms.index("|") == 9
     ), f"Expected 9 spaces for milliseconds, got: {label_line_ms.index('|')}"
+
+
+def test_minimal_dashboard_update_scatter_plot_panel_with_time_unit():
+    """Test that MinimalDashboard.update_scatter_plot_panel accepts time_unit parameter.
+    
+    This test catches the bug where MinimalDashboard.update_scatter_plot_panel()
+    only accepted 2 arguments but the CLI was calling it with 3 arguments (including time_unit).
+    """
+    dashboard = MinimalDashboard(time_unit="ms")
+    
+    # Test that the method can be called with time_unit parameter
+    # This should not raise a TypeError
+    dashboard.update_scatter_plot_panel([1.0, 2.0, 100.0, 200.0], "ms")
+    
+    # Test with different time units
+    dashboard.update_scatter_plot_panel([1.0, 2.0, 100.0, 200.0], "s")
+    
+    # Test with None metrics (should not raise error)
+    dashboard.update_scatter_plot_panel(None, "ms")
+
+
+def test_rich_live_dashboard_update_scatter_plot_panel_with_time_unit():
+    """Test that RichLiveDashboard.update_scatter_plot_panel accepts time_unit parameter."""
+    dashboard = RichLiveDashboard(time_unit="ms")
+    
+    # Test that the method can be called with time_unit parameter
+    # This should not raise a TypeError
+    dashboard.update_scatter_plot_panel([1.0, 2.0, 100.0, 200.0], "ms")
+    
+    # Test with different time units
+    dashboard.update_scatter_plot_panel([1.0, 2.0, 100.0, 200.0], "s")
+    
+    # Test with None metrics (should not raise error)
+    dashboard.update_scatter_plot_panel(None, "ms")
+
+
+def test_dashboard_scatter_plot_interface_consistency():
+    """Test that both dashboard types have consistent update_scatter_plot_panel signatures.
+    
+    This ensures that both MinimalDashboard and RichLiveDashboard can be used
+    interchangeably in the CLI without causing TypeError.
+    """
+    minimal_dashboard = MinimalDashboard(time_unit="ms")
+    rich_dashboard = RichLiveDashboard(time_unit="ms")
+    
+    # Test data: ttft, output_latency, input_throughput, output_throughput
+    test_metrics = [1.0, 2.0, 100.0, 200.0]
+    
+    # Both should accept the same call signature
+    minimal_dashboard.update_scatter_plot_panel(test_metrics, "ms")
+    rich_dashboard.update_scatter_plot_panel(test_metrics, "ms")
+    
+    # Both should work with default time_unit
+    minimal_dashboard.update_scatter_plot_panel(test_metrics)
+    rich_dashboard.update_scatter_plot_panel(test_metrics)
+
+
+def test_cli_scatter_plot_call_pattern():
+    """Test the specific call pattern used in CLI that was causing the TypeError.
+    
+    This is a regression test for the bug where CLI calls:
+    dashboard.update_scatter_plot_panel(metrics, time_unit)
+    """
+    # Simulate the CLI call pattern from cli.py lines 454-457
+    dashboard = MinimalDashboard(time_unit="ms")
+    
+    # This is the exact call pattern from the CLI
+    ui_scatter_plot_metrics = [1.0, 2.0, 100.0, 200.0]  # Simulated metrics
+    time_unit = "ms"
+    
+    # This should not raise TypeError: takes 2 positional arguments but 3 were given
+    dashboard.update_scatter_plot_panel(ui_scatter_plot_metrics, time_unit)
