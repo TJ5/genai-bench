@@ -196,8 +196,13 @@ def validate_iteration_params(ctx, param, value) -> str:
         str: The validated iteration_type
     """
     task = ctx.params.get("task")
-    num_concurrency = ctx.params.get("num_concurrency", [])
+    num_concurrency = ctx.params.get("num_concurrency")
     batch_size = ctx.params.get("batch_size", [])
+    request_rate = ctx.params.get("request_rate")
+
+    # Normalize None to empty list for easier checking
+    if num_concurrency is None:
+        num_concurrency = []
 
     # For text-to-embeddings tasks, always use batch_size iteration
     if task == "text-to-embeddings" or task == "text-to-rerank":
@@ -211,7 +216,14 @@ def validate_iteration_params(ctx, param, value) -> str:
     else:
         if value != "num_concurrency":
             click.echo(f"Note: Using num_concurrency iteration for {task} task")
-        num_concurrency = num_concurrency or DEFAULT_NUM_CONCURRENCIES
+        # Only set default num_concurrency if neither num_concurrency
+        # nor request_rate is provided
+        if not num_concurrency and not request_rate:
+            num_concurrency = DEFAULT_NUM_CONCURRENCIES
+        elif not num_concurrency:
+            # If request_rate is provided but num_concurrency is not,
+            # use empty list (will skip concurrency iterations)
+            num_concurrency = []
         value = "num_concurrency"
         batch_size = [1]
 

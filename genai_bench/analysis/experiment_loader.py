@@ -82,7 +82,8 @@ def load_one_experiment(
     for file_name in sorted(os.listdir(folder_name)):
         file_path = os.path.join(folder_name, file_name)
         if re.match(
-            r"^.+_.+_(?:concurrency|batch_size)_\d+_time_\d+s\.json$", file_name
+            r"^.+_.+_(?:concurrency|batch_size|request_rate)_[\d.]+_time_\d+s\.json$",
+            file_name,
         ):
             load_run_data(file_path, run_data, filter_criteria)
 
@@ -97,23 +98,27 @@ def load_one_experiment(
             )
             experiment_metadata.traffic_scenario.remove(scenario)
 
-    expected_concurrency = set(
+    expected_iteration_values = set(
         {
-            "batch_size": experiment_metadata.batch_size,
+            "batch_size": experiment_metadata.batch_size or [],
             "num_concurrency": experiment_metadata.num_concurrency,
+            "request_rate": experiment_metadata.request_rate or [],
         }.get(experiment_metadata.iteration_type, [])
     )
 
-    # Check if any scenarios are missing concurrency levels
+    # Check if any scenarios are missing iteration levels
     for scenario_key, scenario_data in run_data.items():
-        seen_concurrency: Set[int] = scenario_data.get(
+        seen_iteration_values: Set[Any] = scenario_data.get(
             f"{experiment_metadata.iteration_type}_levels", set()
         )  # type: ignore[call-overload]
-        missing_concurrency: List[Any] = sorted(expected_concurrency - seen_concurrency)
-        if missing_concurrency:
+        missing_iteration_values: List[Any] = sorted(
+            expected_iteration_values - seen_iteration_values
+        )
+        if missing_iteration_values:
             logger.warning(
                 f"‼️ Scenario '{scenario_key}' is missing "
-                f"{experiment_metadata.iteration_type} levels: {missing_concurrency}. "
+                f"{experiment_metadata.iteration_type} levels: "
+                f"{missing_iteration_values}. "
                 f"Please re-run this scenario if necessary!"
             )
         del scenario_data[f"{experiment_metadata.iteration_type}_levels"]  # type: ignore[arg-type]
@@ -220,20 +225,22 @@ def load_run_data(
 
         # Get the iteration type and value
         iteration_type = aggregated_metrics.iteration_type
-        iteration_value = (
-            aggregated_metrics.batch_size
-            if iteration_type == "batch_size"
-            else aggregated_metrics.num_concurrency
-        )
+        if iteration_type == "batch_size":
+            iteration_value = aggregated_metrics.batch_size
+        elif iteration_type == "request_rate":
+            iteration_value = aggregated_metrics.request_rate
+        else:
+            iteration_value = aggregated_metrics.num_concurrency
 
         # Store iteration values in scenario data
-        iteration_key = f"{iteration_type}_levels"
-        run_data.setdefault(scenario, {}).setdefault(iteration_key, set()).add(
-            iteration_value
-        )
+        if iteration_value is not None:
+            iteration_key = f"{iteration_type}_levels"
+            run_data.setdefault(scenario, {}).setdefault(iteration_key, set()).add(
+                iteration_value
+            )
 
-        # Store the metrics data
-        run_data.setdefault(scenario, {})[iteration_value] = {
-            "aggregated_metrics": aggregated_metrics,
-            "individual_request_metrics": data.get("individual_request_metrics", []),
-        }
+            # Store the metrics data
+            run_data.setdefault(scenario, {})[iteration_value] = {
+                "aggregated_metrics": aggregated_metrics,
+                "individual_request_metrics": data.get("individual_request_metrics", []),
+            }

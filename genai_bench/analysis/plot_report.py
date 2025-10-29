@@ -605,7 +605,10 @@ def plot_single_scenario_inference_speed_vs_throughput(
         return
 
     concurrency_data = scenario_metrics["data"]
-    concurrency_levels = sorted(scenario_metrics[f"{iteration_type}"])
+    # Sort levels, handling mixed int/float types (for request_rate vs concurrency)
+    concurrency_levels = sorted(
+        scenario_metrics[f"{iteration_type}"], key=lambda x: (float(x),)
+    )
     fig, ax = plt.subplots(figsize=(10, 6))
 
     # Filter out concurrency levels with missing data and collect valid data points

@@ -188,7 +188,10 @@ class ExperimentMetadata(BaseModel):
     batch_size: Optional[List[int]] = Field(
         None, description="The batch sizes for embedding tasks."
     )
-    iteration_type: Literal["num_concurrency", "batch_size"] = Field(
+    request_rate: Optional[List[float]] = Field(
+        None, description="Request rates in requests per second."
+    )
+    iteration_type: Literal["num_concurrency", "batch_size", "request_rate"] = Field(
         "num_concurrency", description="Type of iteration used in the experiment."
     )
     traffic_scenario: List[str] = Field(default_factory=list)

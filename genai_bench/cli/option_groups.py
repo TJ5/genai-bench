@@ -538,15 +538,32 @@ def experiment_options(func):
         type=click.INT,
         multiple=True,
         is_eager=True,
-        default=DEFAULT_NUM_CONCURRENCIES,
+        default=None,
         help="""
                 List of concurrency levels to run the experiment with.
+                If not provided and --request-rate is also not provided,
+                defaults to [1, 2, 4, 8, 16, 32, 64, 128, 256].
 
                 \b
                 Example to input multiple values:
                 --num-concurrency 1 --num-concurrency 2 \\
                 --num-concurrency 4 --num-concurrency 8 \\
                 --num-concurrency 16 --num-concurrency 32
+             """,
+    )(func)
+    func = click.option(
+        "--request-rate",
+        type=click.FLOAT,
+        multiple=True,
+        default=None,
+        help="""
+                List of request rates (in requests per second) to use for
+                the experiment.
+
+                \b
+                Example to input multiple values:
+                --request-rate 1.0 --request-rate 5.0 \\
+                --request-rate 10.0 --request-rate 20.0
              """,
     )(func)
     func = click.option(

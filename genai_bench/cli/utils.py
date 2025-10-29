@@ -5,6 +5,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple
 
+import gevent
+
 from genai_bench.logging import init_logger
 
 logger = init_logger(__name__)
@@ -115,3 +117,134 @@ def get_run_params(iteration_type: str, iteration_value: int) -> Tuple[str, int,
     if iteration_type == "batch_size":
         return "Batch Size", iteration_value, 1
     return "Concurrency", 1, iteration_value
+
+
+def adjust_concurrency_for_target_rate(
+    environment: Environment,
+    target_rate: float,
+    adjustment_interval: float = 5.0,
+    min_concurrency: int = 1,
+    max_concurrency: int = 1000,
+    stop_event: Optional[gevent.event.Event] = None,
+) -> gevent.Greenlet:
+    """
+    Dynamically adjust concurrency to maintain target request rate.
+    
+    Uses Little's Law: concurrency = request_rate × average_latency
+    
+    Args:
+        environment: Locust Environment instance
+        target_rate: Target requests per second
+        adjustment_interval: Seconds between concurrency adjustments
+        min_concurrency: Minimum allowed concurrency
+        max_concurrency: Maximum allowed concurrency
+        stop_event: Event to signal when to stop adjusting
+        
+    Returns:
+        Greenlet running the adjustment loop
+    """
+    if not environment.runner:
+        logger.warning("No runner available for concurrency adjustment")
+        return None
+        
+    def adjustment_loop():
+        """Background loop that adjusts concurrency based on metrics."""
+        last_check_time = time.monotonic()
+        last_request_count = 0
+        
+        while True:
+            # Check if we should stop
+            if stop_event and stop_event.is_set():
+                break
+                
+            # Wait for adjustment interval
+            gevent.sleep(adjustment_interval)
+            
+            if not environment.runner or not environment.runner.stats:
+                continue
+                
+            current_time = time.monotonic()
+            stats = environment.runner.stats
+            
+            # Get current request count and calculate actual rate
+            current_request_count = stats.total.num_requests
+            time_delta = current_time - last_check_time
+            
+            if time_delta < 0.1:  # Too soon, skip this check
+                continue
+                
+            actual_rate = (current_request_count - last_request_count) / time_delta
+            last_check_time = current_time
+            last_request_count = current_request_count
+            
+            # Get average response time (E2E latency) from stats
+            avg_response_time = stats.total.avg_response_time
+            if avg_response_time is None or avg_response_time <= 0:
+                # Not enough data yet, skip adjustment
+                logger.debug(
+                    "Insufficient metrics data for concurrency adjustment, "
+                    f"skipping. Requests: {current_request_count}"
+                )
+                continue
+            
+            # Calculate required concurrency using Little's Law
+            # concurrency = target_rate × average_latency
+            required_concurrency = int(target_rate * avg_response_time / 1000.0)  # Convert ms to s
+            
+            # Apply bounds
+            required_concurrency = max(min_concurrency, min(max_concurrency, required_concurrency))
+            
+            current_users = environment.runner.user_count
+            
+            # Only adjust if difference is significant (>10% or >2 users)
+            if abs(required_concurrency - current_users) > max(2, current_users * 0.1):
+                logger.info(
+                    f"Adjusting concurrency: {current_users} -> {required_concurrency} "
+                    f"(target_rate={target_rate:.2f} req/s, "
+                    f"actual_rate={actual_rate:.2f} req/s, "
+                    f"avg_latency={avg_response_time:.1f}ms)"
+                )
+                
+                # Adjust concurrency using Locust's runner API
+                if required_concurrency > current_users:
+                    # Need more users - spawn additional users
+                    users_to_spawn = required_concurrency - current_users
+                    spawn_rate = min(
+                        users_to_spawn,
+                        max(1, int(current_users * 0.2) + 1)  # Spawn at most 20% more at once
+                    )
+                    # Update user count using Locust's internal API
+                    try:
+                        # Use runner's spawn_users method if available
+                        if hasattr(environment.runner, 'spawn_users'):
+                            environment.runner.spawn_users(users_to_spawn, spawn_rate=spawn_rate)
+                        else:
+                            # Fallback: restart with new concurrency
+                            # This is disruptive but necessary for Locust compatibility
+                            logger.debug(
+                                "Restarting runner with new concurrency "
+                                f"{current_users} -> {required_concurrency}"
+                            )
+                            environment.runner.stop()
+                            gevent.sleep(0.5)  # Brief pause before restart
+                            environment.runner.start(
+                                required_concurrency,
+                                spawn_rate=spawn_rate
+                            )
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to adjust concurrency: {e}. "
+                            "Continuing with current concurrency."
+                        )
+                else:
+                    # Need fewer users - Locust doesn't directly support killing users
+                    # Restarting would be too disruptive, so we log and let it adjust
+                    # gradually on the next cycle or via natural user completion
+                    logger.debug(
+                        f"Would reduce concurrency to {required_concurrency}, "
+                        "but reduction requires restart (will adjust on next cycle)"
+                    )
+    
+    # Start the adjustment loop in a greenlet
+    adjustment_greenlet = gevent.spawn(adjustment_loop)
+    return adjustment_greenlet

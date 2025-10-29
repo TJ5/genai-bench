@@ -1,6 +1,8 @@
+from locust import constant_throughput
 from locust.env import Environment
 from locust.runners import WorkerRunner
 
+import gevent
 import os
 import sys
 import time
@@ -27,7 +29,12 @@ from genai_bench.cli.option_groups import (
     storage_auth_options,
 )
 from genai_bench.cli.report import excel, plot
-from genai_bench.cli.utils import get_experiment_path, get_run_params, manage_run_time
+from genai_bench.cli.utils import (
+    adjust_concurrency_for_target_rate,
+    get_experiment_path,
+    get_run_params,
+    manage_run_time,
+)
 from genai_bench.cli.validation import validate_tokenizer
 from genai_bench.data.config import DatasetConfig
 from genai_bench.data.loaders.factory import DataLoaderFactory
@@ -78,6 +85,7 @@ def benchmark(
     task,
     iteration_type,
     num_concurrency,
+    request_rate,
     warmup_ratio,
     cooldown_ratio,
     batch_size,
@@ -325,6 +333,7 @@ def benchmark(
         task=task,
         num_concurrency=num_concurrency,
         batch_size=batch_size,
+        request_rate=request_rate,
         iteration_type=iteration_type,
         traffic_scenario=traffic_scenario,
         server_engine=server_engine,
@@ -375,7 +384,16 @@ def benchmark(
     # Iterate over each scenario_str and concurrency level,
     # and run the experiment
     iteration_values = batch_size if iteration_type == "batch_size" else num_concurrency
-    total_runs = len(traffic_scenario) * len(iteration_values)
+
+    # Calculate total runs: include both concurrency and request_rate iterations
+    # when iteration_type is num_concurrency and request_rate is provided
+    if iteration_type == "num_concurrency" and request_rate:
+        # Runs for concurrency values (if any) + runs for request_rate values
+        total_runs = len(traffic_scenario) * (
+            len(iteration_values) + len(request_rate)
+        )
+    else:
+        total_runs = len(traffic_scenario) * len(iteration_values)
     with dashboard.live:
         for scenario_str in traffic_scenario:
             dashboard.reset_plot_metrics()
@@ -388,103 +406,256 @@ def benchmark(
                 f"{iteration_type}": [],
             }
 
-            for iteration in iteration_values:
-                dashboard.reset_panels()
-                # Create a new progress bar on dashboard
-                iteration_header, batch_size, concurrency = get_run_params(
-                    iteration_type, iteration
-                )
-                dashboard.create_benchmark_progress_task(
-                    f"Scenario: {scenario_str}, {iteration_header}: {iteration}"
-                )
-
-                # Update batch size for each iteration
-                runner.update_batch_size(batch_size)
-
-                aggregated_metrics_collector.set_run_metadata(
-                    iteration, scenario_str, iteration_type
-                )
-
-                # Start the run
-                start_time = time.monotonic()
-                dashboard.start_run(max_time_per_run, start_time, max_requests_per_run)
-
-                # Use custom spawn rate if provided, otherwise use concurrency
-                actual_spawn_rate = (
-                    spawn_rate if spawn_rate is not None else concurrency
-                )
-                logger.info(
-                    f"Starting benchmark with concurrency={concurrency}, "
-                    f"spawn_rate={actual_spawn_rate}"
-                )
-                environment.runner.start(concurrency, spawn_rate=actual_spawn_rate)
-
-                total_run_time = manage_run_time(
-                    max_time_per_run=max_time_per_run,
-                    max_requests_per_run=max_requests_per_run,
-                    environment=environment,
-                )
-
-                environment.runner.stop()
-
-                # Aggregate metrics after each run
-                end_time = time.monotonic()
-                try:
-                    aggregated_metrics_collector.aggregate_metrics_data(
-                        start_time,
-                        end_time,
-                        sonnet_character_token_ratio,
-                        warmup_ratio,
-                        cooldown_ratio,
+            # Run iterations for normal concurrency/batch_size values
+            # Skip if iteration_values is empty (when only request_rate is provided)
+            if iteration_values:
+                for iteration in iteration_values:
+                    dashboard.reset_panels()
+                    # Create a new progress bar on dashboard
+                    iteration_header, batch_size, concurrency = get_run_params(
+                        iteration_type, iteration
                     )
-                except ValueError as e:
-                    debug_file_name = (
-                        f"debug_for_run_{sanitized_scenario_str}_{concurrency}.json"
+                    dashboard.create_benchmark_progress_task(
+                        f"Scenario: {scenario_str}, {iteration_header}: {iteration}"
                     )
-                    aggregated_metrics_collector.save(
-                        os.path.join(experiment_folder_abs_path, debug_file_name),
+
+                    # Update batch size for each iteration
+                    runner.update_batch_size(batch_size)
+
+                    aggregated_metrics_collector.set_run_metadata(
+                        iteration, scenario_str, iteration_type
+                    )
+
+                    # Start the run
+                    start_time = time.monotonic()
+                    dashboard.start_run(max_time_per_run, start_time, max_requests_per_run)
+
+                    # Use custom spawn rate if provided, otherwise use concurrency
+                    actual_spawn_rate = (
+                        spawn_rate if spawn_rate is not None else concurrency
+                    )
+                    logger.info(
+                        f"Starting benchmark with concurrency={concurrency}, "
+                        f"spawn_rate={actual_spawn_rate}"
+                    )
+                    environment.runner.start(concurrency, spawn_rate=actual_spawn_rate)
+
+                    total_run_time = manage_run_time(
+                        max_time_per_run=max_time_per_run,
+                        max_requests_per_run=max_requests_per_run,
+                        environment=environment,
+                    )
+
+                    environment.runner.stop()
+
+                    # Aggregate metrics after each run
+                    end_time = time.monotonic()
+                    try:
+                        aggregated_metrics_collector.aggregate_metrics_data(
+                            start_time,
+                            end_time,
+                            sonnet_character_token_ratio,
+                            warmup_ratio,
+                            cooldown_ratio,
+                        )
+                    except ValueError as e:
+                        debug_file_name = (
+                            f"debug_for_run_{sanitized_scenario_str}_{concurrency}.json"
+                        )
+                        aggregated_metrics_collector.save(
+                            os.path.join(experiment_folder_abs_path, debug_file_name),
+                            metrics_time_unit,
+                        )
+                        raise ValueError(
+                            f"{str(e)} Please check out "
+                            f"{debug_file_name} to see the detailed individual "
+                            f"metrics!"
+                        ) from e
+
+                    dashboard.update_scatter_plot_panel(
+                        aggregated_metrics_collector.get_ui_scatter_plot_metrics(
+                            metrics_time_unit
+                        ),
                         metrics_time_unit,
                     )
-                    raise ValueError(
-                        f"{str(e)} Please check out "
-                        f"{debug_file_name} to see the detailed individual "
-                        f"metrics!"
-                    ) from e
 
-                dashboard.update_scatter_plot_panel(
-                    aggregated_metrics_collector.get_ui_scatter_plot_metrics(
-                        metrics_time_unit
-                    ),
-                    metrics_time_unit,
-                )
+                    logger.info(
+                        f"⏩ Run for scenario {scenario_str}, "
+                        f"{iteration_type} {iteration} has finished after "
+                        f"{int(end_time - start_time)} seconds."
+                    )
 
-                logger.info(
-                    f"⏩ Run for scenario {scenario_str}, "
-                    f"{iteration_type} {iteration} has finished after "
-                    f"{int(end_time - start_time)} seconds."
-                )
+                    # Save and clear metrics after each run
+                    run_name = (
+                        f"{sanitized_scenario_str}_{task}_{iteration_type}_"
+                        f"{iteration}_time_{total_run_time}s.json"
+                    )
+                    aggregated_metrics_collector.save(
+                        os.path.join(experiment_folder_abs_path, run_name),
+                        metrics_time_unit,
+                    )
+                    # Store metrics in memory for interim plot
+                    scenario_metrics["data"][iteration] = {
+                        "aggregated_metrics": aggregated_metrics_collector.aggregated_metrics  # noqa: E501
+                    }
+                    scenario_metrics[f"{iteration_type}"].append(iteration)
 
-                # Save and clear metrics after each run
-                run_name = (
-                    f"{sanitized_scenario_str}_{task}_{iteration_type}_"
-                    f"{iteration}_time_{total_run_time}s.json"
-                )
-                aggregated_metrics_collector.save(
-                    os.path.join(experiment_folder_abs_path, run_name),
-                    metrics_time_unit,
-                )
-                # Store metrics in memory for interim plot
-                scenario_metrics["data"][iteration] = {
-                    "aggregated_metrics": aggregated_metrics_collector.aggregated_metrics  # noqa: E501
-                }
-                scenario_metrics[f"{iteration_type}"].append(iteration)
+                    aggregated_metrics_collector.clear()
 
-                aggregated_metrics_collector.clear()
+                    dashboard.update_total_progress_bars(total_runs)
 
-                dashboard.update_total_progress_bars(total_runs)
+                    # Sleep for 1 sec for server to clear aborted requests
+                    time.sleep(1)
 
-                # Sleep for 1 sec for server to clear aborted requests
-                time.sleep(1)
+            # If iteration_type is num_concurrency and request_rate is provided,
+            # also run iterations for each request_rate value
+            if iteration_type == "num_concurrency" and request_rate:
+                # Use a high enough concurrency to achieve the target request rate
+                # Use max concurrency from the list, or default to 100 if list is empty
+                rate_concurrency = 100 # dumb for now
+
+                for rate in request_rate:
+                    # Set wait_time on user class to use constant_throughput
+                    # for rate control
+                    original_wait_time = None
+                    if hasattr(user_class, "wait_time"):
+                        original_wait_time = user_class.wait_time
+
+                    user_class.wait_time = constant_throughput(rate)
+
+                    try:
+                        dashboard.reset_panels()
+                        dashboard.create_benchmark_progress_task(
+                            f"Scenario: {scenario_str}, Request Rate: {rate}"
+                        )
+
+                        # Use batch_size of 1 for request_rate runs
+                        # (concurrency-based runs)
+                        runner.update_batch_size(1)
+
+                        aggregated_metrics_collector.set_run_metadata(
+                            rate, scenario_str, "request_rate"
+                        )
+
+                        # Start the run
+                        start_time = time.monotonic()
+                        dashboard.start_run(
+                            max_time_per_run, start_time, max_requests_per_run
+                        )
+
+                        # For request_rate runs, start with initial estimate
+                        # Using a conservative estimate: assume 500ms average latency
+                        # initial_concurrency = target_rate * estimated_latency
+                        estimated_latency = 0.5  # seconds, conservative estimate
+                        initial_concurrency = max(1, int(rate * estimated_latency))
+                        rate_concurrency = initial_concurrency
+                        
+                        actual_spawn_rate = (
+                            spawn_rate if spawn_rate is not None else max(1, initial_concurrency // 2)
+                        )
+                        logger.info(
+                            f"Starting benchmark with request_rate={rate} req/s, "
+                            f"initial_concurrency={initial_concurrency} "
+                            f"(estimated_latency={estimated_latency}s), "
+                            f"spawn_rate={actual_spawn_rate}"
+                        )
+                        environment.runner.start(
+                            initial_concurrency, spawn_rate=actual_spawn_rate
+                        )
+
+                        # Start dynamic concurrency adjustment
+                        stop_adjustment = gevent.event.Event()
+                        adjustment_greenlet = adjust_concurrency_for_target_rate(
+                            environment=environment,
+                            target_rate=rate,
+                            adjustment_interval=5.0,  # Adjust every 5 seconds
+                            min_concurrency=1,
+                            max_concurrency=1000,
+                            stop_event=stop_adjustment,
+                        )
+
+                        try:
+                            total_run_time = manage_run_time(
+                                max_time_per_run=max_time_per_run,
+                                max_requests_per_run=max_requests_per_run,
+                                environment=environment,
+                            )
+                        finally:
+                            # Stop the adjustment loop
+                            if adjustment_greenlet:
+                                stop_adjustment.set()
+                                gevent.wait([adjustment_greenlet], timeout=1.0)
+
+                        environment.runner.stop()
+
+                        # Aggregate metrics after each run
+                        end_time = time.monotonic()
+                        try:
+                            aggregated_metrics_collector.aggregate_metrics_data(
+                                start_time,
+                                end_time,
+                                sonnet_character_token_ratio,
+                                warmup_ratio,
+                                cooldown_ratio,
+                            )
+                        except ValueError as e:
+                            debug_file_name = (
+                                f"debug_for_run_{sanitized_scenario_str}_"
+                                f"rate_{rate}.json"
+                            )
+                            aggregated_metrics_collector.save(
+                                os.path.join(
+                                    experiment_folder_abs_path, debug_file_name
+                                ),
+                                metrics_time_unit,
+                            )
+                            raise ValueError(
+                                f"{str(e)} Please check out "
+                                f"{debug_file_name} to see the detailed individual "
+                                f"metrics!"
+                            ) from e
+
+                        dashboard.update_scatter_plot_panel(
+                            aggregated_metrics_collector.get_ui_scatter_plot_metrics(
+                                metrics_time_unit
+                            ),
+                            metrics_time_unit,
+                        )
+
+                        logger.info(
+                            f"⏩ Run for scenario {scenario_str}, "
+                            f"request_rate {rate} req/s has finished after "
+                            f"{int(end_time - start_time)} seconds."
+                        )
+
+                        # Save and clear metrics after each run
+                        run_name = (
+                            f"{sanitized_scenario_str}_{task}_request_rate_"
+                            f"{rate}_time_{total_run_time}s.json"
+                        )
+                        aggregated_metrics_collector.save(
+                            os.path.join(experiment_folder_abs_path, run_name),
+                            metrics_time_unit,
+                        )
+                        # Store metrics in memory for interim plot
+                        # Use the rate value as the key (mixing with concurrency values)
+                        scenario_metrics["data"][rate] = {
+                            "aggregated_metrics": aggregated_metrics_collector.aggregated_metrics  # noqa: E501
+                        }
+                        scenario_metrics[f"{iteration_type}"].append(rate)
+
+                        aggregated_metrics_collector.clear()
+
+                        dashboard.update_total_progress_bars(total_runs)
+
+                        # Sleep for 1 sec for server to clear aborted requests
+                        time.sleep(1)
+                    finally:
+                        # Restore original wait_time if it was saved
+                        if original_wait_time is not None:
+                            user_class.wait_time = original_wait_time
+                        elif hasattr(user_class, "wait_time"):
+                            delattr(user_class, "wait_time")
 
             # Plot using in-memory data after all concurrency levels are done
             plot_single_scenario_inference_speed_vs_throughput(
