@@ -98,30 +98,47 @@ def load_one_experiment(
             )
             experiment_metadata.traffic_scenario.remove(scenario)
 
-    expected_iteration_values = set(
-        {
-            "batch_size": experiment_metadata.batch_size or [],
-            "num_concurrency": experiment_metadata.num_concurrency,
-            "request_rate": experiment_metadata.request_rate or [],
-        }.get(experiment_metadata.iteration_type, [])
-    )
+    # When iteration_type is "num_concurrency", we need to check for both
+    # num_concurrency and request_rate values (since request_rate runs
+    # are stored under "num_concurrency_levels" when iteration_type is num_concurrency)
+    if experiment_metadata.iteration_type == "num_concurrency":
+        # Combine num_concurrency and request_rate for expected values
+        expected_values = set(experiment_metadata.num_concurrency or [])
+        if experiment_metadata.request_rate:
+            expected_values.update(experiment_metadata.request_rate)
+        expected_iteration_values = expected_values
+    else:
+        expected_iteration_values = set(
+            {
+                "batch_size": experiment_metadata.batch_size or [],
+                "request_rate": experiment_metadata.request_rate or [],
+            }.get(experiment_metadata.iteration_type, [])
+        )
 
     # Check if any scenarios are missing iteration levels
     for scenario_key, scenario_data in run_data.items():
+        iteration_levels_key = f"{experiment_metadata.iteration_type}_levels"
         seen_iteration_values: Set[Any] = scenario_data.get(
-            f"{experiment_metadata.iteration_type}_levels", set()
+            iteration_levels_key, set()
         )  # type: ignore[call-overload]
-        missing_iteration_values: List[Any] = sorted(
-            expected_iteration_values - seen_iteration_values
-        )
-        if missing_iteration_values:
-            logger.warning(
-                f"‼️ Scenario '{scenario_key}' is missing "
-                f"{experiment_metadata.iteration_type} levels: "
-                f"{missing_iteration_values}. "
-                f"Please re-run this scenario if necessary!"
+        
+        # Only check for missing values if we have expected values
+        if expected_iteration_values:
+            missing_iteration_values: List[Any] = sorted(
+                expected_iteration_values - seen_iteration_values
             )
-        del scenario_data[f"{experiment_metadata.iteration_type}_levels"]  # type: ignore[arg-type]
+            if missing_iteration_values:
+                logger.warning(
+                    f"‼️ Scenario '{scenario_key}' is missing "
+                    f"{experiment_metadata.iteration_type} levels: "
+                    f"{missing_iteration_values}. "
+                    f"Please re-run this scenario if necessary!"
+                )
+        
+        # Only delete the levels key if it exists (allows for request_rate-only runs
+        # where num_concurrency_levels might not exist)
+        if iteration_levels_key in scenario_data:
+            del scenario_data[iteration_levels_key]  # type: ignore[arg-type]
 
     return experiment_metadata, run_data
 

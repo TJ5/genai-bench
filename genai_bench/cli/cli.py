@@ -1,4 +1,3 @@
-from locust import constant_throughput
 from locust.env import Environment
 from locust.runners import WorkerRunner
 
@@ -515,13 +514,10 @@ def benchmark(
                 rate_concurrency = 100 # dumb for now
 
                 for rate in request_rate:
-                    # Set wait_time on user class to use constant_throughput
-                    # for rate control
-                    original_wait_time = None
-                    if hasattr(user_class, "wait_time"):
-                        original_wait_time = user_class.wait_time
-
-                    user_class.wait_time = constant_throughput(rate)
+                    # Don't use constant_throughput when dynamically adjusting concurrency
+                    # The concurrency adjustment handles rate control via Little's Law
+                    # Removing wait_time allows users to send requests as fast as possible,
+                    # and concurrency adjustment controls the overall rate
 
                     try:
                         dashboard.reset_panels()
@@ -568,6 +564,7 @@ def benchmark(
                         adjustment_greenlet = adjust_concurrency_for_target_rate(
                             environment=environment,
                             target_rate=rate,
+                            aggregated_metrics_collector=aggregated_metrics_collector,
                             adjustment_interval=5.0,  # Adjust every 5 seconds
                             min_concurrency=1,
                             max_concurrency=1000,
@@ -651,11 +648,9 @@ def benchmark(
                         # Sleep for 1 sec for server to clear aborted requests
                         time.sleep(1)
                     finally:
-                        # Restore original wait_time if it was saved
-                        if original_wait_time is not None:
-                            user_class.wait_time = original_wait_time
-                        elif hasattr(user_class, "wait_time"):
-                            delattr(user_class, "wait_time")
+                        # No need to restore wait_time since we're not modifying it
+                        # when using dynamic concurrency adjustment
+                        pass
 
             # Plot using in-memory data after all concurrency levels are done
             plot_single_scenario_inference_speed_vs_throughput(
