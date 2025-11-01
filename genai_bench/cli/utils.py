@@ -282,58 +282,61 @@ def adjust_concurrency_for_target_rate(
                 try:
                     users_to_spawn = required_concurrency - current_users
                     
-                    # Calculate spawn rate for smooth increase
-                    spawn_rate_to_use = min(
-                        abs(users_to_spawn),
-                        max(1, int(current_users * 0.2) + 1)
-                    ) if users_to_spawn > 0 else 1
+                    # Spawn all users instantly for immediate concurrency change
+                    spawn_rate_to_use = abs(users_to_spawn) if users_to_spawn != 0 else 1
                     
-                    # Try setting target_user_count first (newer Locust versions)
-                    if hasattr(environment.runner, 'target_user_count'):
-                        try:
-                            environment.runner.target_user_count = required_concurrency
-                            if hasattr(environment.runner, 'spawn_rate'):
-                                environment.runner.spawn_rate = spawn_rate_to_use
-                            # Wait a bit and check if it worked
-                            gevent.sleep(2.0)
-                            new_user_count = environment.runner.user_count
-                            if new_user_count > current_users:
-                                logger.info(
-                                    f"   ✅ Users changing: {current_users} → "
-                                    f"{new_user_count} users (target: {required_concurrency})"
-                                )
-                            else:
-                                raise ValueError("target_user_count didn't spawn users")
-                        except (AttributeError, ValueError, TypeError):
-                            # Fall through to stop/start method
-                            pass
-                    
-                    # Fallback: Use stop/start with new concurrency
-                    if environment.runner.user_count == current_users:
+                    # Call start() with new user count while running
+                    # In Locust 2.0+, this adjusts users without resetting stats
+                    try:
+                        # Save request count before adjustment to verify stats are preserved
+                        requests_before = environment.runner.stats.total.num_requests if environment.runner.stats else 0
+                        
                         # Check if runner is currently running
-                        runner_was_running = False
+                        is_running = False
                         if hasattr(environment.runner, 'state'):
-                            runner_was_running = environment.runner.state in ['spawning', 'running']
-                        elif hasattr(environment.runner, 'greenlet'):
-                            runner_was_running = environment.runner.greenlet is not None
+                            is_running = environment.runner.state in ['spawning', 'running']
                         
-                        if runner_was_running:
-                            environment.runner.stop()
-                            gevent.sleep(0.5)
-                        
-                        environment.runner.start(
-                            required_concurrency,
-                            spawn_rate=spawn_rate_to_use
-                        )
-                        
-                        # Check if it worked after a brief wait
-                        gevent.sleep(1.0)
-                        new_user_count = environment.runner.user_count
-                        if new_user_count > current_users:
-                            logger.info(
-                                f"   ✅ Users changing: {current_users} → "
-                                f"{new_user_count} users (target: {required_concurrency})"
+                        if is_running:
+                            # Call start() with new user count while running
+                            # This adjusts users without resetting stats in Locust 2.0+
+                            environment.runner.start(
+                                required_concurrency,
+                                spawn_rate=spawn_rate_to_use
                             )
+                            
+                            # Wait for spawning to start
+                            gevent.sleep(1.0)
+                            new_user_count = environment.runner.user_count
+                            requests_after = environment.runner.stats.total.num_requests if environment.runner.stats else 0
+                            
+                            # Verify stats were preserved
+                            if requests_after < requests_before:
+                                logger.warning(
+                                    f"   ⚠️  Stats may have been reset: "
+                                    f"requests before={requests_before}, after={requests_after}"
+                                )
+                            
+                            logger.info(
+                                f"   ✅ Adjusted users: {current_users} → "
+                                f"{new_user_count} (target: {required_concurrency}, "
+                                f"requests preserved: {requests_after})"
+                            )
+                        else:
+                            # If not running, just start normally
+                            environment.runner.start(
+                                required_concurrency,
+                                spawn_rate=spawn_rate_to_use
+                            )
+                            gevent.sleep(1.0)
+                            logger.info(
+                                f"   ✅ Started with {required_concurrency} users"
+                            )
+                    
+                    except Exception as e:
+                        logger.error(
+                            f"   ❌ Failed to adjust concurrency using start(): {e}. "
+                            f"Exception type: {type(e).__name__}"
+                        )
                     
                 except Exception as e:
                     logger.error(

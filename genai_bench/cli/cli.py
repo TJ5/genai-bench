@@ -1,5 +1,6 @@
 from locust.env import Environment
 from locust.runners import WorkerRunner
+from locust import constant_throughput
 
 import gevent
 import os
@@ -546,6 +547,18 @@ def benchmark(
                         initial_concurrency = max(1, int(rate * estimated_latency))
                         rate_concurrency = initial_concurrency
                         
+                        # For slower rates with only one user, use constant_throughput
+                        # to enforce wait_time for precise rate control
+                        original_wait_time = None
+                        if initial_concurrency == 1:
+                            if hasattr(user_class, "wait_time"):
+                                original_wait_time = user_class.wait_time
+                            user_class.wait_time = constant_throughput(rate)
+                            logger.info(
+                                f"Using constant_throughput({rate}) for single-user "
+                                f"rate limiting"
+                            )
+                        
                         actual_spawn_rate = (
                             spawn_rate if spawn_rate is not None else max(1, initial_concurrency // 2)
                         )
@@ -648,9 +661,12 @@ def benchmark(
                         # Sleep for 1 sec for server to clear aborted requests
                         time.sleep(1)
                     finally:
-                        # No need to restore wait_time since we're not modifying it
-                        # when using dynamic concurrency adjustment
-                        pass
+                        # Restore original wait_time if we set it for single-user rate limiting
+                        if original_wait_time is not None:
+                            user_class.wait_time = original_wait_time
+                        elif hasattr(user_class, "wait_time") and initial_concurrency == 1:
+                            # If we set wait_time but there was no original, remove it
+                            delattr(user_class, "wait_time")
 
             # Plot using in-memory data after all concurrency levels are done
             plot_single_scenario_inference_speed_vs_throughput(
