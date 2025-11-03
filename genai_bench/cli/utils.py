@@ -133,14 +133,14 @@ def adjust_concurrency_for_target_rate(
     """
     Dynamically adjust concurrency to maintain target request rate.
     
-    Uses Little's Law: concurrency = request_rate × P90_latency
-    (Uses P90 latency instead of average to better handle tail latency)
+    Uses Little's Law: concurrency = request_rate × median_latency
+    (Uses median latency to better represent typical response times)
     
     Args:
         environment: Locust Environment instance
         target_rate: Target requests per second
         aggregated_metrics_collector: Optional metrics collector to access
-            P90 latency from collected metrics
+            median latency from collected metrics
         adjustment_interval: Seconds between concurrency adjustments
         min_concurrency: Minimum allowed concurrency
         max_concurrency: Maximum allowed concurrency
@@ -192,25 +192,25 @@ def adjust_concurrency_for_target_rate(
             requests_in_interval = current_request_count - last_request_count
             actual_rate = requests_in_interval / time_delta
             
-            # Get average E2E latency from metrics collector if available,
-            # otherwise fall back to average from Locust stats
-            avg_e2e_latency_s = None
-            avg_response_time_ms = stats.total.avg_response_time
-            avg_response_time_s = avg_response_time_ms / 1000.0 if avg_response_time_ms else None
+            # Get median E2E latency from metrics collector if available,
+            # otherwise fall back to median from Locust stats
+            median_e2e_latency_s = None
+            median_response_time_ms = stats.total.median_response_time
+            median_response_time_s = median_response_time_ms / 1000.0 if median_response_time_ms else None
             
-            # Try to get average latency from aggregated_metrics_collector
+            # Try to get median latency from aggregated_metrics_collector
             if aggregated_metrics_collector and aggregated_metrics_collector.all_request_metrics:
-                # Calculate average from e2e_latency values
+                # Calculate median from e2e_latency values
                 e2e_latencies = [
                     m.e2e_latency
                     for m in aggregated_metrics_collector.all_request_metrics
                     if m.e2e_latency is not None and not m.error_code
                 ]
                 if e2e_latencies:
-                    avg_e2e_latency_s = float(np.mean(e2e_latencies))
+                    median_e2e_latency_s = float(np.median(e2e_latencies))
             
-            # Use average E2E if available, otherwise fall back to Locust's average response time
-            latency_to_use_s = avg_e2e_latency_s if avg_e2e_latency_s is not None else avg_response_time_s
+            # Use median E2E if available, otherwise fall back to Locust's median response time
+            latency_to_use_s = median_e2e_latency_s if median_e2e_latency_s is not None else median_response_time_s
             
             # Get error count for completeness
             error_count = stats.total.num_failures
@@ -231,7 +231,7 @@ def adjust_concurrency_for_target_rate(
                 f"   Actual Rate: {actual_rate:.2f} req/s "
                 f"({requests_in_interval} requests in {time_delta:.1f}s)\n"
                 f"   Current Concurrency: {current_users} users\n"
-                f"   Avg E2E Latency: {latency_display_ms:.1f}ms ({latency_to_use_s:.3f}s)"
+                f"   Median E2E Latency: {latency_display_ms:.1f}ms ({latency_to_use_s:.3f}s)"
             )
             
             last_check_time = current_time
@@ -256,7 +256,7 @@ def adjust_concurrency_for_target_rate(
             # Log calculated requirements
             logger.info(
                 f"🧮 [Check #{check_count}] Required Concurrency Calculation:\n"
-                f"   Formula: concurrency = target_rate × average latency\n"
+                f"   Formula: concurrency = target_rate × median latency\n"
                 f"   Calculation: {target_rate:.2f} req/s × {latency_to_use_s:.3f}s "
                 f"= {required_concurrency:.1f} users\n"
                 f"   Current: {current_users} users | Required: {required_concurrency} users "

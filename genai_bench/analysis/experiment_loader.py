@@ -117,10 +117,11 @@ def load_one_experiment(
 
     # Check if any scenarios are missing iteration levels
     for scenario_key, scenario_data in run_data.items():
-        iteration_levels_key = f"{experiment_metadata.iteration_type}_levels"
-        seen_iteration_values: Set[Any] = scenario_data.get(
-            iteration_levels_key, set()
-        )  # type: ignore[call-overload]
+        # For mixed runs, collect ALL iteration values across all types
+        seen_iteration_values: Set[Any] = set()
+        for possible_key in ['num_concurrency_levels', 'batch_size_levels', 'request_rate_levels']:
+            if possible_key in scenario_data:
+                seen_iteration_values.update(scenario_data.get(possible_key, set()))  # type: ignore[arg-type]
         
         # Only check for missing values if we have expected values
         if expected_iteration_values:
@@ -135,10 +136,11 @@ def load_one_experiment(
                     f"Please re-run this scenario if necessary!"
                 )
         
-        # Only delete the levels key if it exists (allows for request_rate-only runs
-        # where num_concurrency_levels might not exist)
-        if iteration_levels_key in scenario_data:
-            del scenario_data[iteration_levels_key]  # type: ignore[arg-type]
+        # Delete ALL possible iteration level tracking keys to support mixed runs
+        # (e.g., experiments with both num_concurrency and request_rate)
+        for possible_key in ['num_concurrency_levels', 'batch_size_levels', 'request_rate_levels']:
+            if possible_key in scenario_data:
+                del scenario_data[possible_key]  # type: ignore[arg-type]
 
     return experiment_metadata, run_data
 

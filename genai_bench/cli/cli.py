@@ -540,11 +540,9 @@ def benchmark(
                             max_time_per_run, start_time, max_requests_per_run
                         )
 
-                        # For request_rate runs, start with initial estimate
-                        # Using a conservative estimate: assume 500ms average latency
-                        # initial_concurrency = target_rate * estimated_latency
-                        estimated_latency = 0.5  # seconds, conservative estimate
-                        initial_concurrency = max(1, int(rate * estimated_latency))
+                        # For request_rate runs, start with concurrency equal to target rate
+                        # This allows faster ramp-up; dynamic adjustment will tune it based on actual latency
+                        initial_concurrency = max(1, round(rate))
                         rate_concurrency = initial_concurrency
                         
                         # For slower rates with only one user, use constant_throughput
@@ -564,8 +562,8 @@ def benchmark(
                         )
                         logger.info(
                             f"Starting benchmark with request_rate={rate} req/s, "
-                            f"initial_concurrency={initial_concurrency} "
-                            f"(estimated_latency={estimated_latency}s), "
+                            f"initial_concurrency={initial_concurrency} users "
+                            f"(will be dynamically adjusted based on actual latency), "
                             f"spawn_rate={actual_spawn_rate}"
                         )
                         environment.runner.start(
