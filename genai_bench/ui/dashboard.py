@@ -281,7 +281,9 @@ class RichLiveDashboard:
                 self.benchmark_progress.update(
                     self.benchmark_progress_task_id, completed=progress_increment
                 )
-                update_progress(self.layout, self.total_progress, self.benchmark_progress)
+                update_progress(
+                    self.layout, self.total_progress, self.benchmark_progress
+                )
             except KeyError:
                 # Task was already removed, ignore
                 pass

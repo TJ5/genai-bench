@@ -3,7 +3,6 @@ import oci
 
 from genai_bench.cli.validation import (
     DEFAULT_BATCH_SIZES,
-    DEFAULT_NUM_CONCURRENCIES,
     set_model_from_tokenizer,
     validate_additional_request_params,
     validate_api_backend,

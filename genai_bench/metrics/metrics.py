@@ -134,7 +134,9 @@ class AggregatedMetrics(BaseModel):
     )
     iteration_type: str = Field(
         "num_concurrency",
-        description="Type of iteration used (num_concurrency, batch_size, or request_rate)",
+        description=(
+            "Type of iteration used " "(num_concurrency, batch_size, or request_rate)"
+        ),
     )
 
     run_duration: float = Field(0.0, description="Run duration in seconds.")

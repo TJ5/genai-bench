@@ -1,7 +1,7 @@
 import json
 import os
 import re
-from typing import Any, Dict, List, Literal, Optional, Set, Tuple
+from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
 
 from genai_bench.logging import init_logger
 from genai_bench.metrics.metrics import AggregatedMetrics, RequestLevelMetrics
@@ -108,21 +108,32 @@ def load_one_experiment(
             expected_values.update(experiment_metadata.request_rate)
         expected_iteration_values = expected_values
     else:
+        batch_list: List[Union[int, float]] = list(experiment_metadata.batch_size or [])
+        rate_list: List[Union[int, float]] = list(
+            experiment_metadata.request_rate or []
+        )
+        iteration_lists: Dict[str, List[Union[int, float]]] = {
+            "batch_size": batch_list,
+            "request_rate": rate_list,
+        }
         expected_iteration_values = set(
-            {
-                "batch_size": experiment_metadata.batch_size or [],
-                "request_rate": experiment_metadata.request_rate or [],
-            }.get(experiment_metadata.iteration_type, [])
+            iteration_lists.get(experiment_metadata.iteration_type, [])
         )
 
     # Check if any scenarios are missing iteration levels
     for scenario_key, scenario_data in run_data.items():
         # For mixed runs, collect ALL iteration values across all types
         seen_iteration_values: Set[Any] = set()
-        for possible_key in ['num_concurrency_levels', 'batch_size_levels', 'request_rate_levels']:
+        for possible_key in [
+            "num_concurrency_levels",
+            "batch_size_levels",
+            "request_rate_levels",
+        ]:
             if possible_key in scenario_data:
-                seen_iteration_values.update(scenario_data.get(possible_key, set()))  # type: ignore[arg-type]
-        
+                values = scenario_data[possible_key]
+                if isinstance(values, set):
+                    seen_iteration_values.update(values)
+
         # Only check for missing values if we have expected values
         if expected_iteration_values:
             missing_iteration_values: List[Any] = sorted(
@@ -135,10 +146,14 @@ def load_one_experiment(
                     f"{missing_iteration_values}. "
                     f"Please re-run this scenario if necessary!"
                 )
-        
+
         # Delete ALL possible iteration level tracking keys to support mixed runs
         # (e.g., experiments with both num_concurrency and request_rate)
-        for possible_key in ['num_concurrency_levels', 'batch_size_levels', 'request_rate_levels']:
+        for possible_key in [
+            "num_concurrency_levels",
+            "batch_size_levels",
+            "request_rate_levels",
+        ]:
             if possible_key in scenario_data:
                 del scenario_data[possible_key]  # type: ignore[arg-type]
 
@@ -244,6 +259,7 @@ def load_run_data(
 
         # Get the iteration type and value
         iteration_type = aggregated_metrics.iteration_type
+        iteration_value: Union[int, float, None]
         if iteration_type == "batch_size":
             iteration_value = aggregated_metrics.batch_size
         elif iteration_type == "request_rate":
@@ -261,5 +277,7 @@ def load_run_data(
             # Store the metrics data
             run_data.setdefault(scenario, {})[iteration_value] = {
                 "aggregated_metrics": aggregated_metrics,
-                "individual_request_metrics": data.get("individual_request_metrics", []),
+                "individual_request_metrics": data.get(
+                    "individual_request_metrics", []
+                ),
             }

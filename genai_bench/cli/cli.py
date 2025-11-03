@@ -1,14 +1,14 @@
+from locust import constant_throughput
 from locust.env import Environment
 from locust.runners import WorkerRunner
-from locust import constant_throughput
 
-import gevent
 import os
 import sys
 import time
 from pathlib import Path
 
 import click
+import gevent
 
 from genai_bench.analysis.excel_report import create_workbook
 from genai_bench.analysis.experiment_loader import load_one_experiment
@@ -389,9 +389,7 @@ def benchmark(
     # when iteration_type is num_concurrency and request_rate is provided
     if iteration_type == "num_concurrency" and request_rate:
         # Runs for concurrency values (if any) + runs for request_rate values
-        total_runs = len(traffic_scenario) * (
-            len(iteration_values) + len(request_rate)
-        )
+        total_runs = len(traffic_scenario) * (len(iteration_values) + len(request_rate))
     else:
         total_runs = len(traffic_scenario) * len(iteration_values)
     with dashboard.live:
@@ -428,7 +426,9 @@ def benchmark(
 
                     # Start the run
                     start_time = time.monotonic()
-                    dashboard.start_run(max_time_per_run, start_time, max_requests_per_run)
+                    dashboard.start_run(
+                        max_time_per_run, start_time, max_requests_per_run
+                    )
 
                     # Use custom spawn rate if provided, otherwise use concurrency
                     actual_spawn_rate = (
@@ -510,15 +510,12 @@ def benchmark(
             # If iteration_type is num_concurrency and request_rate is provided,
             # also run iterations for each request_rate value
             if iteration_type == "num_concurrency" and request_rate:
-                # Use a high enough concurrency to achieve the target request rate
-                # Use max concurrency from the list, or default to 100 if list is empty
-                rate_concurrency = 100 # dumb for now
-
                 for rate in request_rate:
-                    # Don't use constant_throughput when dynamically adjusting concurrency
-                    # The concurrency adjustment handles rate control via Little's Law
-                    # Removing wait_time allows users to send requests as fast as possible,
-                    # and concurrency adjustment controls the overall rate
+                    # Don't use constant_throughput when dynamically adjusting
+                    # concurrency. The concurrency adjustment handles rate control
+                    # via Little's Law. Removing wait_time allows users to send
+                    # requests as fast as possible, and concurrency adjustment
+                    # controls the overall rate
 
                     try:
                         dashboard.reset_panels()
@@ -540,11 +537,11 @@ def benchmark(
                             max_time_per_run, start_time, max_requests_per_run
                         )
 
-                        # For request_rate runs, start with concurrency equal to target rate
-                        # This allows faster ramp-up; dynamic adjustment will tune it based on actual latency
+                        # For request_rate runs, start with concurrency equal to
+                        # target rate. This allows faster ramp-up; dynamic
+                        # adjustment will tune it based on actual latency
                         initial_concurrency = max(1, round(rate))
-                        rate_concurrency = initial_concurrency
-                        
+
                         # For slower rates with only one user, use constant_throughput
                         # to enforce wait_time for precise rate control
                         original_wait_time = None
@@ -556,9 +553,11 @@ def benchmark(
                                 f"Using constant_throughput({rate}) for single-user "
                                 f"rate limiting"
                             )
-                        
+
                         actual_spawn_rate = (
-                            spawn_rate if spawn_rate is not None else max(1, initial_concurrency // 2)
+                            spawn_rate
+                            if spawn_rate is not None
+                            else max(1, initial_concurrency // 2)
                         )
                         logger.info(
                             f"Starting benchmark with request_rate={rate} req/s, "
@@ -659,10 +658,14 @@ def benchmark(
                         # Sleep for 1 sec for server to clear aborted requests
                         time.sleep(1)
                     finally:
-                        # Restore original wait_time if we set it for single-user rate limiting
+                        # Restore original wait_time if we set it for
+                        # single-user rate limiting
                         if original_wait_time is not None:
                             user_class.wait_time = original_wait_time
-                        elif hasattr(user_class, "wait_time") and initial_concurrency == 1:
+                        elif (
+                            hasattr(user_class, "wait_time")
+                            and initial_concurrency == 1
+                        ):
                             # If we set wait_time but there was no original, remove it
                             delattr(user_class, "wait_time")
 

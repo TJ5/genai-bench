@@ -172,9 +172,7 @@ def _create_summary_sheet_common(
 
         # Sort iterations, handling mixed int/float types
         # (for request_rate vs concurrency)
-        for iteration in sorted(
-            run_data.get(scenario, []), key=lambda x: (float(x),)
-        ):
+        for iteration in sorted(run_data.get(scenario, []), key=lambda x: (float(x),)):
             metrics: AggregatedMetrics = run_data[scenario][iteration][
                 "aggregated_metrics"
             ]
@@ -286,9 +284,7 @@ def _create_appendix_sheet_common(
 
         # Sort iterations, handling mixed int/float types
         # (for request_rate vs concurrency)
-        for iteration in sorted(
-            run_data.get(scenario, []), key=lambda x: (float(x),)
-        ):
+        for iteration in sorted(run_data.get(scenario, []), key=lambda x: (float(x),)):
             metrics: AggregatedMetrics = run_data[scenario][iteration][
                 "aggregated_metrics"
             ]
@@ -434,9 +430,7 @@ def create_aggregated_metrics_sheet(
     for scenario in merged_scenarios:
         # Sort iterations, handling mixed int/float types
         # (for request_rate vs concurrency)
-        for iteration in sorted(
-            run_data.get(scenario, []), key=lambda x: (float(x),)
-        ):
+        for iteration in sorted(run_data.get(scenario, []), key=lambda x: (float(x),)):
             metrics: AggregatedMetrics = run_data[scenario][iteration][  # type: ignore[call-overload, assignment]
                 "aggregated_metrics"
             ]
@@ -501,9 +495,7 @@ def create_single_request_metrics_sheet(
         start_row_iteration = start_row
         # Sort iterations, handling mixed int/float types
         # (for request_rate vs concurrency)
-        for iteration in sorted(
-            run_data.get(scenario, []), key=lambda x: (float(x),)
-        ):
+        for iteration in sorted(run_data.get(scenario, []), key=lambda x: (float(x),)):
             row_for_iteration = 0
             metrics: List[RequestLevelMetrics] = run_data[scenario][iteration][  # type: ignore[call-overload, assignment]
                 "individual_request_metrics"
