@@ -1,3 +1,4 @@
+from locust import constant_throughput
 from locust.env import Environment
 from locust.runners import WorkerRunner
 
@@ -27,7 +28,12 @@ from genai_bench.cli.option_groups import (
     storage_auth_options,
 )
 from genai_bench.cli.report import excel, plot
-from genai_bench.cli.utils import get_experiment_path, get_run_params, manage_run_time
+from genai_bench.cli.utils import (
+    get_experiment_path,
+    get_request_rate_run_params,
+    get_run_params,
+    manage_run_time,
+)
 from genai_bench.cli.validation import validate_tokenizer
 from genai_bench.data.config import DatasetConfig
 from genai_bench.data.loaders.factory import DataLoaderFactory
@@ -78,6 +84,7 @@ def benchmark(
     task,
     iteration_type,
     num_concurrency,
+    request_rate,
     warmup_ratio,
     cooldown_ratio,
     batch_size,
@@ -314,6 +321,18 @@ def benchmark(
         f"This experiment will be saved in folder {experiment_folder_abs_path}."
     )
 
+    # Handle default concurrency behavior: if request_rate is specified but
+    # num_concurrency equals defaults, skip concurrency runs
+    # Note: This comparison works because if user didn't specify --num-concurrency,
+    # it will use the default list. If they did specify it, it will be a different
+    # list object but we compare contents.
+    from genai_bench.cli.validation import DEFAULT_NUM_CONCURRENCIES
+
+    if request_rate and list(num_concurrency) == DEFAULT_NUM_CONCURRENCIES:
+        # User specified request_rate but num_concurrency is using defaults,
+        # so skip default concurrency runs
+        num_concurrency = []
+
     experiment_metadata = ExperimentMetadata(
         cmd=cmd_line,
         benchmark_version=GENAI_BENCH_VERSION,
@@ -324,6 +343,7 @@ def benchmark(
         model=model,
         task=task,
         num_concurrency=num_concurrency,
+        request_rate=request_rate,
         batch_size=batch_size,
         iteration_type=iteration_type,
         traffic_scenario=traffic_scenario,
@@ -372,10 +392,15 @@ def benchmark(
         raise RuntimeError("Metrics collector not initialized")
     aggregated_metrics_collector = runner.metrics_collector
 
-    # Iterate over each scenario_str and concurrency level,
-    # and run the experiment
+    # Build list of all runs to execute: request_rate runs + concurrency/batch_size runs
     iteration_values = batch_size if iteration_type == "batch_size" else num_concurrency
-    total_runs = len(traffic_scenario) * len(iteration_values)
+    request_rate_values = request_rate if request_rate else []
+
+    # Calculate total runs across all scenarios
+    total_runs = len(traffic_scenario) * (
+        len(request_rate_values) + len(iteration_values)
+    )
+
     with dashboard.live:
         for scenario_str in traffic_scenario:
             dashboard.reset_plot_metrics()
@@ -388,6 +413,113 @@ def benchmark(
                 f"{iteration_type}": [],
             }
 
+            # First, run all request_rate benchmarks
+            for rate in request_rate_values:
+                dashboard.reset_panels()
+                # Create a new progress bar on dashboard
+                iteration_header, batch_size_val, concurrency = (
+                    get_request_rate_run_params(rate)
+                )
+                dashboard.create_benchmark_progress_task(
+                    f"Scenario: {scenario_str}, {iteration_header}: {rate}"
+                )
+
+                # Set wait_time on user class for rate limiting
+                user_class.wait_time = constant_throughput(rate)
+
+                # Update batch size for each iteration
+                runner.update_batch_size(batch_size_val)
+
+                aggregated_metrics_collector.set_run_metadata(
+                    rate, scenario_str, "request_rate"
+                )
+
+                # Start the run
+                start_time = time.monotonic()
+                dashboard.start_run(max_time_per_run, start_time, max_requests_per_run)
+
+                # For request rate runs, use request rate as spawn rate if not
+                # explicitly provided. This ensures users are spawned at a rate
+                # that matches the target request rate
+                actual_spawn_rate = spawn_rate if spawn_rate is not None else rate
+                logger.info(
+                    f"Starting benchmark with request_rate={rate}, "
+                    f"concurrency={concurrency}, spawn_rate={actual_spawn_rate}"
+                )
+                environment.runner.start(concurrency, spawn_rate=actual_spawn_rate)
+
+                total_run_time = manage_run_time(
+                    max_time_per_run=max_time_per_run,
+                    max_requests_per_run=max_requests_per_run,
+                    environment=environment,
+                )
+
+                environment.runner.stop()
+
+                # Clear wait_time after request rate run
+                user_class.wait_time = None
+
+                # Aggregate metrics after each run
+                end_time = time.monotonic()
+                try:
+                    aggregated_metrics_collector.aggregate_metrics_data(
+                        start_time,
+                        end_time,
+                        sonnet_character_token_ratio,
+                        warmup_ratio,
+                        cooldown_ratio,
+                    )
+                except ValueError as e:
+                    debug_file_name = (
+                        f"debug_for_run_{sanitized_scenario_str}_"
+                        f"request_rate_{rate}.json"
+                    )
+                    aggregated_metrics_collector.save(
+                        os.path.join(experiment_folder_abs_path, debug_file_name),
+                        metrics_time_unit,
+                    )
+                    raise ValueError(
+                        f"{str(e)} Please check out "
+                        f"{debug_file_name} to see the detailed individual "
+                        f"metrics!"
+                    ) from e
+
+                dashboard.update_scatter_plot_panel(
+                    aggregated_metrics_collector.get_ui_scatter_plot_metrics(
+                        metrics_time_unit
+                    ),
+                    metrics_time_unit,
+                )
+
+                logger.info(
+                    f"⏩ Run for scenario {scenario_str}, "
+                    f"request_rate {rate} has finished after "
+                    f"{int(end_time - start_time)} seconds."
+                )
+
+                # Save and clear metrics after each run
+                run_name = (
+                    f"{sanitized_scenario_str}_{task}_request_rate_"
+                    f"{rate}_time_{total_run_time}s.json"
+                )
+                aggregated_metrics_collector.save(
+                    os.path.join(experiment_folder_abs_path, run_name),
+                    metrics_time_unit,
+                )
+                # Store metrics in memory for interim plot
+                scenario_metrics["data"][f"request_rate_{rate}"] = {
+                    "aggregated_metrics": aggregated_metrics_collector.aggregated_metrics  # noqa: E501
+                }
+                scenario_metrics[f"{iteration_type}"].append(f"request_rate_{rate}")
+
+                aggregated_metrics_collector.clear()
+
+                dashboard.update_total_progress_bars(total_runs)
+
+                # Sleep for 1 sec for server to clear aborted requests
+                time.sleep(1)
+
+            # Then, run all concurrency/batch_size benchmarks
             for iteration in iteration_values:
                 dashboard.reset_panels()
                 # Create a new progress bar on dashboard
@@ -397,6 +529,9 @@ def benchmark(
                 dashboard.create_benchmark_progress_task(
                     f"Scenario: {scenario_str}, {iteration_header}: {iteration}"
                 )
+
+                # Ensure wait_time is cleared for concurrency runs
+                user_class.wait_time = None
 
                 # Update batch size for each iteration
                 runner.update_batch_size(batch_size)

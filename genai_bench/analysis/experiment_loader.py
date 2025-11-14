@@ -82,7 +82,8 @@ def load_one_experiment(
     for file_name in sorted(os.listdir(folder_name)):
         file_path = os.path.join(folder_name, file_name)
         if re.match(
-            r"^.+_.+_(?:concurrency|batch_size)_\d+_time_\d+s\.json$", file_name
+            r"^.+_.+_(?:concurrency|batch_size|request_rate)_\d+_time_\d+s\.json$",
+            file_name,
         ):
             load_run_data(file_path, run_data, filter_criteria)
 
@@ -97,26 +98,79 @@ def load_one_experiment(
             )
             experiment_metadata.traffic_scenario.remove(scenario)
 
-    expected_concurrency = set(
-        {
-            "batch_size": experiment_metadata.batch_size,
-            "num_concurrency": experiment_metadata.num_concurrency,
-        }.get(experiment_metadata.iteration_type, [])
-    )
+    # Determine which iteration types to check for this experiment
+    # Always check the primary iteration_type for backward compatibility
+    # Additionally check request_rate if present (for mixed experiments)
+    iteration_types_present = [experiment_metadata.iteration_type]
 
-    # Check if any scenarios are missing concurrency levels
+    # Add request_rate if present (for mixed experiments with both
+    # request_rate and num_concurrency)
+    if experiment_metadata.request_rate:
+        iteration_types_present.append("request_rate")
+
+    # Build expected values from all present iteration types
+    expected_values_map = {
+        "batch_size": experiment_metadata.batch_size or [],
+        "num_concurrency": experiment_metadata.num_concurrency,
+        "request_rate": experiment_metadata.request_rate or [],
+    }
+    expected_concurrency = set()
+    for it_type in iteration_types_present:
+        expected_concurrency.update(expected_values_map.get(it_type, []))
+
+    # Check if any scenarios are missing levels for any iteration type
     for scenario_key, scenario_data in run_data.items():
-        seen_concurrency: Set[int] = scenario_data.get(
-            f"{experiment_metadata.iteration_type}_levels", set()
-        )  # type: ignore[call-overload]
-        missing_concurrency: List[Any] = sorted(expected_concurrency - seen_concurrency)
+        # Collect seen values from all relevant levels keys
+        # Note: scenario_data may contain string keys like "_levels" for metadata
+        seen_values: Set[int] = set()
+        for it_type in iteration_types_present:
+            levels_key = f"{it_type}_levels"
+            seen_for_type = scenario_data.get(levels_key)  # type: ignore[call-overload]
+            if isinstance(seen_for_type, set):
+                seen_values.update(seen_for_type)
+
+        missing_concurrency: List[Any] = sorted(expected_concurrency - seen_values)
         if missing_concurrency:
-            logger.warning(
-                f"‼️ Scenario '{scenario_key}' is missing "
-                f"{experiment_metadata.iteration_type} levels: {missing_concurrency}. "
-                f"Please re-run this scenario if necessary!"
-            )
-        del scenario_data[f"{experiment_metadata.iteration_type}_levels"]  # type: ignore[arg-type]
+            # Build a descriptive message about which types are missing
+            missing_by_type = {}
+            for it_type in iteration_types_present:
+                levels_key = f"{it_type}_levels"
+                seen_for_type = scenario_data.get(levels_key)  # type: ignore[call-overload]
+                if not isinstance(seen_for_type, set):
+                    seen_for_type = set()
+                expected_for_type = set(expected_values_map.get(it_type, []))
+                missing_for_type = sorted(expected_for_type - seen_for_type)
+                if missing_for_type:
+                    missing_by_type[it_type] = missing_for_type
+
+            if missing_by_type:
+                # Use old format for single-type experiments (backward compatibility)
+                # Use new format for mixed experiments
+                if len(missing_by_type) == 1:
+                    it_type, missing_values = next(iter(missing_by_type.items()))
+                    logger.warning(
+                        f"‼️ Scenario '{scenario_key}' is missing {it_type} "
+                        f"levels: {missing_values}. "
+                        f"Please re-run this scenario if necessary!"
+                    )
+                else:
+                    missing_desc = ", ".join(
+                        [f"{k}: {v}" for k, v in missing_by_type.items()]
+                    )
+                    logger.warning(
+                        f"‼️ Scenario '{scenario_key}' is missing levels: "
+                        f"{missing_desc}. Please re-run this scenario if necessary!"
+                    )
+
+        # Remove ALL _levels metadata keys (not just the one matching
+        # iteration_type). This is necessary because mixed experiments can have
+        # both num_concurrency_levels and request_rate_levels keys, and we need
+        # to remove all of them
+        keys_to_remove = [
+            k for k in scenario_data if isinstance(k, str) and k.endswith("_levels")
+        ]
+        for key in keys_to_remove:
+            scenario_data.pop(key, None)  # type: ignore[arg-type]
 
     return experiment_metadata, run_data
 
@@ -220,11 +274,15 @@ def load_run_data(
 
         # Get the iteration type and value
         iteration_type = aggregated_metrics.iteration_type
-        iteration_value = (
-            aggregated_metrics.batch_size
-            if iteration_type == "batch_size"
-            else aggregated_metrics.num_concurrency
-        )
+        if iteration_type == "batch_size":
+            iteration_value = aggregated_metrics.batch_size
+        elif iteration_type == "request_rate":
+            iteration_value = aggregated_metrics.request_rate
+            if iteration_value is None:
+                # Skip if request_rate is None (shouldn't happen for request_rate runs)
+                return
+        else:
+            iteration_value = aggregated_metrics.num_concurrency
 
         # Store iteration values in scenario data
         iteration_key = f"{iteration_type}_levels"

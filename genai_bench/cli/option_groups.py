@@ -550,6 +550,22 @@ def experiment_options(func):
              """,
     )(func)
     func = click.option(
+        "--request-rate",
+        type=click.INT,
+        multiple=True,
+        default=None,
+        help="""
+                List of request rates (requests per second) to run the experiment with.
+                If specified, benchmarks will be run at the specified request rates.
+                Can be used alongside --num-concurrency to run both request rate
+                and concurrency benchmarks.
+
+                \b
+                Example to input multiple values:
+                --request-rate 10 --request-rate 20 --request-rate 50
+             """,
+    )(func)
+    func = click.option(
         "--iteration-type",
         type=click.Choice(["num_concurrency", "batch_size"], case_sensitive=False),
         default="num_concurrency",

@@ -115,3 +115,12 @@ def get_run_params(iteration_type: str, iteration_value: int) -> Tuple[str, int,
     if iteration_type == "batch_size":
         return "Batch Size", iteration_value, 1
     return "Concurrency", 1, iteration_value
+
+
+def get_request_rate_run_params(request_rate: int) -> Tuple[str, int, int]:
+    """
+    Returns appropriate header, batch_size, and num_concurrency for request rate
+    runs. Uses functionally unlimited concurrency (1000) to ensure rate limiting
+    is the bottleneck.
+    """
+    return "Request Rate", 1, 1000

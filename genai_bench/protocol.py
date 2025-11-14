@@ -185,6 +185,12 @@ class ExperimentMetadata(BaseModel):
     num_concurrency: List[conint(ge=1)] = Field(  # type: ignore[valid-type]
         ..., description="The number of concurrent requests."
     )
+    request_rate: Optional[List[int]] = Field(
+        None,
+        description=(
+            "The request rates (requests per second) for rate-limited benchmarks."
+        ),
+    )
     batch_size: Optional[List[int]] = Field(
         None, description="The batch sizes for embedding tasks."
     )
