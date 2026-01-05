@@ -548,14 +548,18 @@ class TestDistributedModeRateAccuracy:
     @pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
     @pytest.mark.parametrize(
         "num_workers,target_rate,port_offset",
-        [(2, 10, 0), (4, 20, 1), (4, 100, 2)],
+        [
+            (2, 400, 0),
+            (4, 800, 1),
+            (8, 1600, 2),
+        ],
     )
     def test_distributed_mode_rate_accuracy(
         self, num_workers, target_rate, port_offset
     ):
         """Test distributed mode achieves correct total rate."""
         expected_total_rate = target_rate
-        num_requests_per_worker = 100
+        num_requests_per_worker = 3000
         total_requests = num_requests_per_worker * num_workers
         tolerance = 0.05  # 5% for distributed mode
 
@@ -593,11 +597,10 @@ class TestDistributedModeRateAccuracy:
                     f"{expected_total_rate:.2f} req/s (tolerance: {tolerance * 100}%)"
                 )
 
-    @pytest.mark.skip(reason="High-rate distributed tests are unreliable in CI")
     @pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
     @pytest.mark.parametrize(
         "num_workers,target_rate,port_offset",
-        [(8, 200, 3), (16, 800, 4)],
+        [(2, 1000, 3), (4, 2000, 4), (8, 4000, 5), (16, 2000, 6)],
     )
     def test_distributed_mode_rate_accuracy_high_rate(
         self, num_workers, target_rate, port_offset
@@ -608,9 +611,9 @@ class TestDistributedModeRateAccuracy:
         with many workers at high request rates.
         """
         expected_total_rate = target_rate
-        num_requests_per_worker = 100
+        num_requests_per_worker = 3000
         total_requests = num_requests_per_worker * num_workers
-        tolerance = 0.08  # 8% for high rate distributed mode (CI variability)
+        tolerance = 0.05  # 5% for high rate distributed mode (CI variability)
 
         base_port = 5557 + (os.getpid() % 1000) + (port_offset * 100)
 
