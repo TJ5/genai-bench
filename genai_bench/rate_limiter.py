@@ -10,7 +10,7 @@ from genai_bench.logging import init_logger
 
 logger = init_logger(__name__)
 
-BUCKET_SIZE = 1  # Fixed bucket size of 1 token for rate limiting
+MAX_BUCKET_SIZE = 100
 
 
 class TokenBucketRateLimiter:
@@ -46,7 +46,8 @@ class TokenBucketRateLimiter:
             raise ValueError(f"Rate must be positive, got {rate}")
 
         self.rate = rate
-        self.tokens: int = BUCKET_SIZE  # Start with full bucket (always an integer)
+        self.bucket_size = min(int(rate), MAX_BUCKET_SIZE)
+        self.tokens: int = 1
         self.last_update = time.monotonic()
         self.lock = Semaphore(value=1)  # Gevent-compatible lock
         self.stopped = False
@@ -68,8 +69,7 @@ class TokenBucketRateLimiter:
 
         if tokens_to_add >= 1.0:
             tokens_added = int(tokens_to_add)
-            # Ensure tokens remains an integer (min returns int when both args are int)
-            self.tokens = int(min(BUCKET_SIZE, self.tokens + tokens_added))
+            self.tokens = min(self.bucket_size, self.tokens + tokens_added)
 
             time_used = tokens_added / self.rate
             self.last_update = self.last_update + time_used
@@ -103,9 +103,7 @@ class TokenBucketRateLimiter:
                     self.tokens -= 1
                     return True
 
-                # Calculate how long until next token is available
-                tokens_needed = BUCKET_SIZE - self.tokens
-                wait_time = tokens_needed / self.rate
+                wait_time = 1.0 / self.rate
 
             # Check timeout
             if timeout is not None:
@@ -166,6 +164,6 @@ class TokenBucketRateLimiter:
         if you need to restart after stopping.
         """
         with self.lock:
-            self.tokens = BUCKET_SIZE
+            self.tokens = self.bucket_size
             self.last_update = time.monotonic()
             logger.debug("Token bucket reset to full")

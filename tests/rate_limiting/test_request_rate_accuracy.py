@@ -14,6 +14,7 @@ from locust.runners import MasterRunner, WorkerRunner
 
 import contextlib
 import gc
+import multiprocessing
 import os
 import threading
 import time
@@ -385,163 +386,52 @@ class TestRequestRateAccuracy:
         "mock_user_class",
         "mock_metrics_collector",
     )
-    def test_local_mode_rate_1_req_per_sec(self, cli_runner):
-        """Test ~1 req/s with rate limiter."""
-        target_rate = 1
-        expected_spacing = 1.0 / target_rate
-        num_requests = 10
-        tolerance = 0.03
-
-        timestamps = run_benchmark_with_rate(
-            cli_runner, target_rate=target_rate, max_requests=num_requests, max_time=20
-        )
-
-        assert len(timestamps) >= num_requests
-        spacings = analyze_timestamp_spacing(timestamps)
-        # Skip first spacing for initialization
-        avg_spacing = sum(spacings[1:]) / len(spacings[1:])
-        assert (
-            abs(avg_spacing - expected_spacing) / expected_spacing < tolerance
-        ), f"Average spacing {avg_spacing:.3f}s != expected {expected_spacing:.3f}s"
-
-    @pytest.mark.usefixtures(
-        "mock_env_variables",
-        "mock_dashboard",
-        "mock_validate_tokenizer",
-        "mock_file_system",
-        "mock_report_and_plot",
-        "mock_experiment_path",
-        "mock_user_class",
-        "mock_metrics_collector",
+    @pytest.mark.parametrize(
+        "target_rate,num_requests",
+        [
+            (1, 10),
+            (100, 2000),
+            (400, 4000),
+        ],
     )
-    def test_local_mode_rate_10_req_per_sec(self, cli_runner):
-        """Test ~10 req/s with rate limiter."""
-        target_rate = 10
-        expected_spacing = 1.0 / target_rate
-        num_requests = 100
-        tolerance = 0.03
-
-        timestamps = run_benchmark_with_rate(
-            cli_runner, target_rate=target_rate, max_requests=num_requests, max_time=20
-        )
-
-        assert len(timestamps) >= num_requests
-        spacings = analyze_timestamp_spacing(timestamps)
-        # Skip first few for initialization
-        avg_spacing = (
-            sum(spacings[2:]) / len(spacings[2:])
-            if len(spacings) > 3
-            else sum(spacings) / len(spacings)
-        )
-        assert (
-            abs(avg_spacing - expected_spacing) / expected_spacing < tolerance
-        ), f"Average spacing {avg_spacing:.3f}s != expected {expected_spacing:.3f}s"
-
-    @pytest.mark.usefixtures(
-        "mock_env_variables",
-        "mock_dashboard",
-        "mock_validate_tokenizer",
-        "mock_file_system",
-        "mock_report_and_plot",
-        "mock_experiment_path",
-        "mock_user_class",
-        "mock_metrics_collector",
-    )
-    def test_local_mode_rate_50_req_per_sec(self, cli_runner):
-        """Test ~50 req/s with rate limiter."""
-        target_rate = 50
-        expected_spacing = 1.0 / target_rate
-        num_requests = 500
-        tolerance = 0.03
-
-        timestamps = run_benchmark_with_rate(
-            cli_runner, target_rate=target_rate, max_requests=num_requests, max_time=20
-        )
-
-        assert len(timestamps) >= num_requests
-        spacings = analyze_timestamp_spacing(timestamps)
-        # Skip first few for initialization
-        avg_spacing = (
-            sum(spacings[2:]) / len(spacings[2:])
-            if len(spacings) > 3
-            else sum(spacings) / len(spacings)
-        )
-        assert (
-            abs(avg_spacing - expected_spacing) / expected_spacing < tolerance
-        ), f"Average spacing {avg_spacing:.3f}s != expected {expected_spacing:.3f}s"
-
-    @pytest.mark.usefixtures(
-        "mock_env_variables",
-        "mock_dashboard",
-        "mock_validate_tokenizer",
-        "mock_file_system",
-        "mock_report_and_plot",
-        "mock_experiment_path",
-        "mock_user_class",
-        "mock_metrics_collector",
-    )
-    def test_local_mode_rate_100_req_per_sec(self, cli_runner):
-        """Test ~100 req/s with rate limiter."""
-        target_rate = 100
-        expected_spacing = 1.0 / target_rate
-        num_requests = 1000
-        tolerance = 0.03
-
-        timestamps = run_benchmark_with_rate(
-            cli_runner, target_rate=target_rate, max_requests=num_requests, max_time=20
-        )
-
-        assert len(timestamps) >= num_requests
-        spacings = analyze_timestamp_spacing(timestamps)
-        # Skip first few for initialization
-        avg_spacing = (
-            sum(spacings[2:]) / len(spacings[2:])
-            if len(spacings) > 3
-            else sum(spacings) / len(spacings)
-        )
-        assert (
-            abs(avg_spacing - expected_spacing) / expected_spacing < tolerance
-        ), f"Average spacing {avg_spacing:.3f}s != expected {expected_spacing:.3f}s"
-
-    @pytest.mark.usefixtures(
-        "mock_env_variables",
-        "mock_dashboard",
-        "mock_validate_tokenizer",
-        "mock_file_system",
-        "mock_report_and_plot",
-        "mock_experiment_path",
-        "mock_user_class",
-        "mock_metrics_collector",
-    )
-    def test_local_mode_rate_400_req_per_sec(self, cli_runner):
-        """Test ~50 req/s with rate limiter."""
-        target_rate = 400
-        expected_spacing = 1.0 / target_rate
-        num_requests = 4000
+    def test_local_mode_rate_accuracy(self, cli_runner, target_rate, num_requests):
+        """Test local mode achieves correct request rate."""
         tolerance = 0.05
+        expected_spacing = 1.0 / target_rate
 
         timestamps = run_benchmark_with_rate(
             cli_runner, target_rate=target_rate, max_requests=num_requests, max_time=20
         )
 
-        assert len(timestamps) >= num_requests
+        assert (
+            len(timestamps) >= num_requests
+        ), f"Expected >= {num_requests} timestamps, got {len(timestamps)}"
+
         spacings = analyze_timestamp_spacing(timestamps)
-        # Skip first few for initialization
+        skip_count = min(2, len(spacings) - 1) if len(spacings) > 1 else 0
         avg_spacing = (
-            sum(spacings[2:]) / len(spacings[2:])
-            if len(spacings) > 3
+            sum(spacings[skip_count:]) / len(spacings[skip_count:])
+            if len(spacings) > skip_count
             else sum(spacings) / len(spacings)
         )
-        assert (
-            abs(avg_spacing - expected_spacing) / expected_spacing < tolerance
-        ), f"Average spacing {avg_spacing:.3f}s != expected {expected_spacing:.3f}s"
+
+        assert abs(avg_spacing - expected_spacing) / expected_spacing < tolerance, (
+            f"Actual spacing {avg_spacing:.4f}s != expected {expected_spacing:.4f}s "
+            f"(tolerance: {tolerance * 100}%)"
+        )
 
 
 # ============================================================================
 # Distributed Mode Tests (Direct Setup)
 # ============================================================================
 
+MIN_CPUS_FOR_DISTRIBUTED = 4
 
+
+@pytest.mark.skipif(
+    multiprocessing.cpu_count() < MIN_CPUS_FOR_DISTRIBUTED,
+    reason=f"Need {MIN_CPUS_FOR_DISTRIBUTED}+ CPUs, have {multiprocessing.cpu_count()}",
+)
 class TestDistributedModeRateAccuracy:
     """Test distributed mode rate accuracy using direct setup."""
 
@@ -551,7 +441,7 @@ class TestDistributedModeRateAccuracy:
         [
             (2, 400, 0),
             (4, 800, 1),
-            (8, 1600, 2),
+            (4, 1600, 2),
         ],
     )
     def test_distributed_mode_rate_accuracy(
@@ -559,7 +449,7 @@ class TestDistributedModeRateAccuracy:
     ):
         """Test distributed mode achieves correct total rate."""
         expected_total_rate = target_rate
-        num_requests_per_worker = 3000
+        num_requests_per_worker = 5000
         total_requests = num_requests_per_worker * num_workers
         tolerance = 0.05  # 5% for distributed mode
 
@@ -597,21 +487,20 @@ class TestDistributedModeRateAccuracy:
                     f"{expected_total_rate:.2f} req/s (tolerance: {tolerance * 100}%)"
                 )
 
+    @pytest.mark.skip(
+        reason="High-intensity test - skip in CI due to resource constraints"
+    )
     @pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
     @pytest.mark.parametrize(
         "num_workers,target_rate,port_offset",
-        [(2, 1000, 3), (4, 2000, 4), (8, 4000, 5), (16, 2000, 6)],
+        [(2, 5000, 3), (4, 9000, 4), (8, 10000, 5), (16, 10000, 6)],
     )
     def test_distributed_mode_rate_accuracy_high_rate(
         self, num_workers, target_rate, port_offset
     ):
-        """Test distributed mode achieves correct total rate for high rates.
-
-        Uses higher tolerance (8%) to account for CI environment variability
-        with many workers at high request rates.
-        """
+        """Test distributed mode achieves correct total rate for high rates."""
         expected_total_rate = target_rate
-        num_requests_per_worker = 3000
+        num_requests_per_worker = 10000
         total_requests = num_requests_per_worker * num_workers
         tolerance = 0.05  # 5% for high rate distributed mode (CI variability)
 

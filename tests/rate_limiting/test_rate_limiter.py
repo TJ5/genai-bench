@@ -5,7 +5,7 @@ import time
 import gevent
 import pytest
 
-from genai_bench.rate_limiter import BUCKET_SIZE, TokenBucketRateLimiter
+from genai_bench.rate_limiter import TokenBucketRateLimiter
 
 
 class TestTokenBucketRateLimiter:
@@ -16,7 +16,7 @@ class TestTokenBucketRateLimiter:
         rate_limiter = TokenBucketRateLimiter(rate=10.0)
 
         assert rate_limiter.rate == 10.0
-        assert rate_limiter.tokens == BUCKET_SIZE  # Starts full
+        assert rate_limiter.tokens == 1  # Starts with 1 token to avoid burst
 
     def test_initialization_invalid_rate(self):
         """Test that invalid rate raises ValueError."""
@@ -33,7 +33,7 @@ class TestTokenBucketRateLimiter:
         # Should succeed immediately
         result = rate_limiter.acquire()
         assert result is True
-        assert rate_limiter.tokens < BUCKET_SIZE  # Token consumed
+        assert rate_limiter.tokens < rate_limiter.bucket_size  # Token consumed
 
     def test_acquire_multiple_tokens(self):
         """Test acquiring multiple tokens in succession."""
@@ -123,15 +123,15 @@ class TestTokenBucketRateLimiter:
         """Test getting available token count."""
         rate_limiter = TokenBucketRateLimiter(rate=10.0)
 
-        # Should start with full bucket
+        # Should start with 1 token
         available = rate_limiter.get_available_tokens()
-        assert available == BUCKET_SIZE
+        assert available == 1
 
         # Consume the token
         rate_limiter.acquire()
 
         available = rate_limiter.get_available_tokens()
-        assert available < BUCKET_SIZE
+        assert available == 0
 
     def test_reset(self):
         """Test resetting the rate limiter."""
@@ -145,7 +145,7 @@ class TestTokenBucketRateLimiter:
 
         # Should be full again
         available = rate_limiter.get_available_tokens()
-        assert available == BUCKET_SIZE
+        assert available == rate_limiter.bucket_size
 
     def test_acquire_timeout_false(self):
         """Test acquire returns False when timeout expires."""
@@ -279,9 +279,9 @@ class TestTokenBucketRateLimiter:
         """Test that reset() doesn't reset the stopped state."""
         rate_limiter = TokenBucketRateLimiter(rate=10.0)
 
-        # Consume a token
+        # Consume the initial token
         rate_limiter.acquire()
-        assert rate_limiter.tokens < BUCKET_SIZE
+        assert rate_limiter.tokens == 0
 
         # Stop the rate limiter
         rate_limiter.stop()
@@ -289,7 +289,7 @@ class TestTokenBucketRateLimiter:
 
         # Reset should refill tokens but not reset stopped state
         rate_limiter.reset()
-        assert rate_limiter.tokens == BUCKET_SIZE
+        assert rate_limiter.tokens == rate_limiter.bucket_size
         assert rate_limiter.stopped is True  # Still stopped
 
         # Should still return False on acquire

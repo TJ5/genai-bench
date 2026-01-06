@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from genai_bench.protocol import UserChatRequest, UserChatResponse, UserResponse
-from genai_bench.rate_limiter import BUCKET_SIZE, TokenBucketRateLimiter
+from genai_bench.rate_limiter import TokenBucketRateLimiter
 from genai_bench.user.base_user import BaseUser
 
 
@@ -129,7 +129,7 @@ class TestBaseUser:
         assert result is True
 
         # Token should have been consumed
-        assert rate_limiter.get_available_tokens() < BUCKET_SIZE
+        assert rate_limiter.get_available_tokens() < rate_limiter.bucket_size
 
     def test_acquire_rate_limit_token_with_rate_limiter_stopped(self, mock_environment):
         """Test acquire_rate_limit_token() when rate_limiter exists but is stopped."""
