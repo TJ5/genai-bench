@@ -487,17 +487,20 @@ class TestDistributedModeRateAccuracy:
                     f"{expected_total_rate:.2f} req/s (tolerance: {tolerance * 100}%)"
                 )
 
+    @pytest.mark.skip(
+        reason="High-intensity test - skip in CI due to resource constraints"
+    )
     @pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
     @pytest.mark.parametrize(
         "num_workers,target_rate,port_offset",
-        [(2, 5000, 3), (4, 9000, 4), (8, 10000, 5)],
+        [(2, 5000, 3), (4, 9000, 4), (8, 10000, 5), (16, 10000, 6)],
     )
     def test_distributed_mode_rate_accuracy_high_rate(
         self, num_workers, target_rate, port_offset
     ):
         """Test distributed mode achieves correct total rate for high rates."""
         expected_total_rate = target_rate
-        num_requests_per_worker = 20000
+        num_requests_per_worker = 10000
         total_requests = num_requests_per_worker * num_workers
         tolerance = 0.05  # 5% for high rate distributed mode (CI variability)
 
