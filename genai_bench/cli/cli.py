@@ -455,7 +455,7 @@ def benchmark(
 
                         runner.update_rate_limiter(per_worker_rate)
                         logger.info(
-                            f"🪣 Distributed mode: Target rate {iteration:.2f} req/s "
+                            f"Distributed mode: Target rate {iteration:.2f} req/s "
                             f"divided among {num_workers} workers "
                             f"({per_worker_rate:.4f} req/s per worker, "
                             f"total: {per_worker_rate * num_workers:.2f} req/s)"
@@ -468,9 +468,11 @@ def benchmark(
                             rate=iteration,  # iteration value is the target rate
                         )
                         logger.info(
-                            f"🪣 Initialized Token Bucket Rate Limiter at "
+                            f"Initialized Token Bucket Rate Limiter at "
                             f"{iteration} req/s"
                         )
+                    # Set target rate for rate monitoring
+                    aggregated_metrics_collector.set_target_rate(iteration)
                     logger.info(
                         f"Starting benchmark with request_rate={iteration} req/s, "
                         f"concurrency={concurrency} "
@@ -483,6 +485,7 @@ def benchmark(
                 else:
                     # Remove any existing rate limiter for non-rate-limited runs
                     environment.rate_limiter = None
+                    aggregated_metrics_collector.set_target_rate(None)
                     # Use custom spawn rate if provided, otherwise use concurrency
                     actual_spawn_rate = (
                         spawn_rate if spawn_rate is not None else concurrency

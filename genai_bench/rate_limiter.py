@@ -46,7 +46,7 @@ class TokenBucketRateLimiter:
             raise ValueError(f"Rate must be positive, got {rate}")
 
         self.rate = rate
-        self.bucket_size = min(int(rate), MAX_BUCKET_SIZE)
+        self.bucket_size = max(1, min(int(rate), MAX_BUCKET_SIZE))
         self.tokens: int = 1
         self.last_update = time.monotonic()
         self.lock = Semaphore(value=1)  # Gevent-compatible lock

@@ -157,6 +157,7 @@ class RichLiveDashboard:
             "output_throughput": [],
             "output_latency": [],
         }
+        self._last_rate_warning_time: float = 0
         self.live: Live = Live(
             self.layout,
             console=self.console,
@@ -323,6 +324,9 @@ class RichLiveDashboard:
 
         self.update_benchmark_progress_bars(progress_increment)
 
+        # Check send rate and update logs panel
+        self._check_send_rate(live_metrics)
+
         # No need to update metrics panel or histogram panel when the request
         # fails
         if error_code is not None:
@@ -330,6 +334,40 @@ class RichLiveDashboard:
 
         self.update_metrics_panels(live_metrics, self.metrics_time_unit)
         self.update_histogram_panel(live_metrics, self.metrics_time_unit)
+
+    def _check_send_rate(self, live_metrics: LiveMetricsData):
+        """Check send rate and log warnings/info messages."""
+        rate_info = live_metrics.get("send_rate_info")
+        if not rate_info or not isinstance(rate_info, dict):
+            return
+
+        actual_rate = rate_info.get("actual_rate")
+        target_rate = rate_info.get("target_rate")
+        is_below = rate_info.get("is_below_threshold", False)
+
+        if actual_rate is None or target_rate is None:
+            return
+
+        now = time.monotonic()
+        if now - self._last_rate_warning_time < 10.0:
+            return
+
+        deviation = (target_rate - actual_rate) / target_rate
+
+        if is_below:
+            # Rate is bad (>3% below target)
+            logger.warning(
+                f"Rate warning: actual send rate {actual_rate:.1f} req/s "
+                f"is {deviation:.1%} below target {target_rate:.1f} req/s"
+            )
+        else:
+            # Rate is good (within 3%)
+            logger.info(
+                f"Rate OK: actual send rate {actual_rate:.1f} req/s "
+                f"is within 3% of target {target_rate:.1f} req/s"
+            )
+
+        self._last_rate_warning_time = now
 
     def reset_plot_metrics(self):
         """Reset plot metrics for each scenario."""
@@ -377,6 +415,8 @@ class RichLiveDashboard:
         self.layout["output_histogram"].update(
             self._create_empty_panel("Output Latency Histogram", "bold blue")
         )
+        # Reset rate warning state
+        self._last_rate_warning_time = 0
 
     @staticmethod
     def _create_empty_panel(title: str, border_style: str) -> Panel:

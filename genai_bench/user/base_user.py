@@ -1,6 +1,7 @@
 from locust import HttpUser
 
-from typing import Dict
+import time
+from typing import Dict, Optional
 
 from genai_bench.logging import init_logger
 from genai_bench.metrics.request_metrics_collector import RequestMetricsCollector
@@ -19,6 +20,7 @@ class BaseUser(HttpUser):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+        self._send_timestamp: Optional[float] = None
 
     def acquire_rate_limit_token(self) -> bool:
         """
@@ -37,6 +39,10 @@ class BaseUser(HttpUser):
                 # Rate limiter stopped or timeout - don't proceed with request
                 # This is expected when run is stopping
                 return False
+            # Record timestamp when token acquired (request is about to be sent)
+            self._send_timestamp = time.monotonic()
+        else:
+            self._send_timestamp = None
         return True
 
     @classmethod
@@ -104,6 +110,9 @@ class BaseUser(HttpUser):
                 f" {user_response.status_code},"
                 f" message: {user_response.error_message}."
             )
+
+        # Add send timestamp for rate monitoring
+        request_metrics_collector.metrics.send_timestamp = self._send_timestamp
 
         # Send metrics to aggregated_metrics_collector
         self.environment.runner.send_message(

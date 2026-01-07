@@ -475,7 +475,7 @@ class DistributedRunner:
             # Create rate limiter with the per-worker rate
             environment.rate_limiter = TokenBucketRateLimiter(rate=rate)  # type: ignore[attr-defined]
             logger.info(
-                f"🪣 Worker initialized Token Bucket Rate Limiter at "
+                f"Worker initialized Token Bucket Rate Limiter at "
                 f"{rate:.2f} req/s (per-worker rate)"
             )
 

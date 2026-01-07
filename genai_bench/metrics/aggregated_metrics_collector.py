@@ -1,4 +1,5 @@
 import json
+import time
 from typing import List, Optional, Union
 
 import numpy as np
@@ -34,6 +35,9 @@ class AggregatedMetricsCollector:
             "output_latency": [],
             "stats": {},
         }
+        # For send rate monitoring
+        self._send_timestamps: List[float] = []
+        self._target_rate: Optional[float] = None
 
     def add_single_request_metrics(self, metrics: RequestLevelMetrics):
         """Adds metrics from a single request to the aggregated metrics."""
@@ -42,6 +46,13 @@ class AggregatedMetricsCollector:
 
         # Store individual request metrics
         self.all_request_metrics.append(metrics)
+
+        # Track send timestamp for rate monitoring (use actual send time)
+        if metrics.send_timestamp is not None:
+            self._send_timestamps.append(metrics.send_timestamp)
+        # Fallback to current time if not set (shouldn't happen in normal flow)
+        else:
+            self._send_timestamps.append(time.monotonic())
 
         # Track error codes frequency directly
         if metrics.error_code:
@@ -107,7 +118,7 @@ class AggregatedMetricsCollector:
     def _update_live_metrics(self):
         """Calculates live metrics like avg, max, min, and percentiles."""
         for key in self._live_metrics_data:
-            if key == "stats":
+            if key in ("stats", "send_rate_info"):
                 continue
             values: List[float] = self._live_metrics_data[key]  # type: ignore
             if values:
@@ -162,7 +173,7 @@ class AggregatedMetricsCollector:
         filtered_keys: List[str] = [
             key
             for key in RequestLevelMetrics.model_fields
-            if key not in {"error_code", "error_message"}
+            if key not in {"error_code", "error_message", "send_timestamp"}
         ]
 
         warmup_number = 0
@@ -295,6 +306,66 @@ class AggregatedMetricsCollector:
             "output_latency": [],
             "stats": {},
         }
+        self._send_timestamps = []
+        self._target_rate = None
+
+    def set_target_rate(self, rate: Optional[float]):
+        """Set the target request rate for monitoring."""
+        self._target_rate = rate
+
+    def get_send_rate_info(self, window_seconds: float = 5.0) -> dict:
+        """
+        Calculate actual send rate over a rolling window.
+
+        Args:
+            window_seconds: Time window to calculate rate over
+
+        Returns:
+            Dict with actual_rate, target_rate, and is_below_threshold
+        """
+        if not self._send_timestamps or len(self._send_timestamps) < 2:
+            return {
+                "actual_rate": None,
+                "target_rate": self._target_rate,
+                "is_below_threshold": False,
+            }
+
+        # Sort timestamps (they may arrive out of order in distributed mode)
+        sorted_timestamps = sorted(self._send_timestamps)
+
+        # Use recent timestamps within window
+        latest = sorted_timestamps[-1]
+        window_start = latest - window_seconds
+        recent_timestamps = [t for t in sorted_timestamps if t >= window_start]
+
+        if len(recent_timestamps) < 2:
+            return {
+                "actual_rate": None,
+                "target_rate": self._target_rate,
+                "is_below_threshold": False,
+            }
+
+        # Calculate rate: (count - 1) / time_span
+        time_span = recent_timestamps[-1] - recent_timestamps[0]
+        if time_span <= 0:
+            return {
+                "actual_rate": None,
+                "target_rate": self._target_rate,
+                "is_below_threshold": False,
+            }
+
+        actual_rate = (len(recent_timestamps) - 1) / time_span
+
+        # Check if below threshold (>3% below target)
+        is_below = False
+        if self._target_rate and self._target_rate > 0:
+            is_below = actual_rate < self._target_rate * 0.97
+
+        return {
+            "actual_rate": actual_rate,
+            "target_rate": self._target_rate,
+            "is_below_threshold": is_below,
+        }
 
     def save(self, file_path: str, metrics_time_unit: str = "s"):
         if not self.all_request_metrics:
@@ -321,6 +392,9 @@ class AggregatedMetricsCollector:
 
     def get_live_metrics(self) -> LiveMetricsData:
         """Returns the latest live metrics for use in the UI."""
+        # Include send rate info for rate monitoring
+        rate_info = self.get_send_rate_info()
+        self._live_metrics_data["send_rate_info"] = rate_info  # type: ignore
         return self._live_metrics_data
 
     def get_ui_scatter_plot_metrics(
