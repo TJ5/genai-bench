@@ -359,7 +359,9 @@ class RichLiveDashboard:
             if actual_rate < target_rate:
                 logger.warning(
                     f"Rate warning: actual send rate {actual_rate:.1f} req/s "
-                    f"is {deviation_pct:.1f}% below target {target_rate:.1f} req/s"
+                    f"is {deviation_pct:.1f}% below target {target_rate:.1f} req/s. "
+                    f"If this is consistent, try reducing --max-concurrency if not at "
+                    f"saturation point or increasing --num-workers."
                 )
             else:
                 logger.warning(
