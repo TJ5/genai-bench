@@ -454,6 +454,29 @@ class TestRequestRateInExperimentLoader:
         # The _levels keys should be cleaned up in the final run_data structure
         # (they're used for tracking but removed before returning)
 
+    @patch(
+        "builtins.open",
+        new_callable=mock_open,
+        read_data='{"aggregated_metrics": '
+        '{"scenario": "D(100,100)", '
+        '"request_rate": null, '
+        '"iteration_type": "request_rate"}}',
+    )
+    def test_load_run_data_skips_null_request_rate(self, mock_open, caplog):
+        """Test that load_run_data skips files with null request_rate."""
+        run_data = {}
+        file_path = "fake_path.json"
+        filter_criteria = None
+
+        with caplog.at_level(logging.WARNING):
+            load_run_data(file_path, run_data, filter_criteria)
+
+        # run_data should remain empty since the file was skipped
+        assert run_data == {}
+        # Check that warning was logged
+        assert "iteration_value is None" in caplog.text
+        assert "request_rate" in caplog.text
+
 
 class TestRequestRateFormulas:
     """Test calculations and formulas related to request_rate."""

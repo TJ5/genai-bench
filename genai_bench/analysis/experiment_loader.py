@@ -222,11 +222,20 @@ def load_run_data(
         # Get the iteration type and value
         iteration_type = aggregated_metrics.iteration_type
         if iteration_type == "batch_size":
-            iteration_value: int = aggregated_metrics.batch_size
+            iteration_value: Optional[int] = aggregated_metrics.batch_size
         elif iteration_type == "request_rate":
             iteration_value = aggregated_metrics.request_rate
         else:
             iteration_value = aggregated_metrics.num_concurrency
+
+        # Skip file if iteration_value is None
+        # This can happen since request_rate is optional in AggregatedMetrics
+        if iteration_value is None:
+            logger.warning(
+                f"Skipping file {file_path}: iteration_value is None for "
+                f"iteration_type={iteration_type}."
+            )
+            return
 
         # Store iteration values in scenario data
         iteration_key = f"{iteration_type}_levels"

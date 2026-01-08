@@ -57,9 +57,9 @@ class TokenBucketRateLimiter:
 
     def _refill_tokens(self) -> None:
         """
-        Refill tokens based on time elapsed since last update.
+        Refill tokens based on time elapsed since the last update.
 
-        Called internally before acquiring a token.
+        This method is called internally before acquiring a token.
         """
         now = time.monotonic()
         time_passed = now - self.last_update

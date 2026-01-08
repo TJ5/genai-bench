@@ -336,7 +336,8 @@ class RichLiveDashboard:
         self.update_histogram_panel(live_metrics, self.metrics_time_unit)
 
     def _check_send_rate(self, live_metrics: LiveMetricsData):
-        """Check send rate and log warnings/info messages."""
+        """Check that actual request rate
+        matches desired request rate and log warnings/info messages."""
         rate_info = live_metrics.get("send_rate_info")
         if not rate_info or not isinstance(rate_info, dict):
             return
