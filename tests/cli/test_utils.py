@@ -211,3 +211,193 @@ class TestGetRunParams:
             max_concurrency=1000,
         )
         assert num_concurrency == 16
+
+
+class TestConcurrencySaturationWarnings:
+    """Test concurrency saturation warning functionality in manage_run_time."""
+
+    @patch("genai_bench.cli.utils.logger")
+    @patch("gevent.sleep", return_value=None)
+    def test_concurrency_saturation_warning_logged(
+        self, mock_sleep, mock_logger, mock_environment
+    ):
+        """Test that concurrency saturation warning is logged at threshold."""
+        max_concurrency = 100
+        user_count = 95  # Exactly 95% of max_concurrency
+        target_rate = 10.0
+
+        mock_environment.runner.user_count = user_count
+        # Need enough iterations to reach second 10 (first warning point)
+        # and ensure we don't exit early due to max_requests_per_run
+        mock_requests = PropertyMock(side_effect=[10] * 15)
+        type(mock_environment.runner.stats.total).num_requests = mock_requests
+
+        manage_run_time(
+            max_time_per_run=15,
+            max_requests_per_run=1000,
+            environment=mock_environment,
+            iteration_type="request_rate",
+            target_rate=target_rate,
+            max_concurrency=max_concurrency,
+        )
+
+        # Warning should be logged at second 10 (10 - 0 >= 10)
+        mock_logger.warning.assert_called()
+        warning_message = mock_logger.warning.call_args[0][0]
+        assert "Concurrency saturation" in warning_message
+        assert str(user_count) in warning_message
+        assert str(max_concurrency) in warning_message
+        assert (
+            str(int(target_rate)) in warning_message
+            or str(target_rate) in warning_message
+        )
+        assert "--max-concurrency" in warning_message
+        assert "--request-rate" in warning_message
+
+    @patch("genai_bench.cli.utils.logger")
+    @patch("gevent.sleep", return_value=None)
+    def test_concurrency_saturation_warning_above_threshold(
+        self, mock_sleep, mock_logger, mock_environment
+    ):
+        """Test warning is logged when user_count is above 95% threshold."""
+        max_concurrency = 100
+        user_count = 98  # Above 95% threshold
+        target_rate = 10.0
+
+        mock_environment.runner.user_count = user_count
+        # Need enough iterations to reach second 10 (first warning point)
+        mock_requests = PropertyMock(side_effect=[10] * 15)
+        type(mock_environment.runner.stats.total).num_requests = mock_requests
+
+        manage_run_time(
+            max_time_per_run=15,
+            max_requests_per_run=1000,
+            environment=mock_environment,
+            iteration_type="request_rate",
+            target_rate=target_rate,
+            max_concurrency=max_concurrency,
+        )
+
+        # Warning should be logged at second 10
+        mock_logger.warning.assert_called()
+
+    @patch("genai_bench.cli.utils.logger")
+    @patch("gevent.sleep", return_value=None)
+    def test_concurrency_saturation_no_warning_below_threshold(
+        self, mock_sleep, mock_logger, mock_environment
+    ):
+        """Test no warning when user_count is below 95% threshold."""
+        max_concurrency = 100
+        user_count = 94  # Below 95% threshold
+        target_rate = 10.0
+
+        mock_environment.runner.user_count = user_count
+        mock_requests = PropertyMock(side_effect=[10, 20, 30])
+        type(mock_environment.runner.stats.total).num_requests = mock_requests
+
+        manage_run_time(
+            max_time_per_run=3,
+            max_requests_per_run=1000,
+            environment=mock_environment,
+            iteration_type="request_rate",
+            target_rate=target_rate,
+            max_concurrency=max_concurrency,
+        )
+
+        mock_logger.warning.assert_not_called()
+
+    @patch("genai_bench.cli.utils.logger")
+    @patch("gevent.sleep", return_value=None)
+    def test_concurrency_saturation_warning_rate_limited(
+        self, mock_sleep, mock_logger, mock_environment
+    ):
+        """Test that warning is rate-limited to once per 10 seconds."""
+        max_concurrency = 100
+        user_count = 95  # At threshold
+        target_rate = 10.0
+
+        mock_environment.runner.user_count = user_count
+        # Simulate 25 seconds of runtime (25 iterations)
+        # First warning at second 10 (10 - 0 >= 10)
+        # Second warning at second 20 (20 - 10 >= 10)
+        mock_requests = PropertyMock(side_effect=[10] * 25)
+        type(mock_environment.runner.stats.total).num_requests = mock_requests
+
+        manage_run_time(
+            max_time_per_run=25,
+            max_requests_per_run=1000,
+            environment=mock_environment,
+            iteration_type="request_rate",
+            target_rate=target_rate,
+            max_concurrency=max_concurrency,
+        )
+
+        # Should be called twice: once at second 10, once at second 20
+        assert mock_logger.warning.call_count == 2
+
+    @patch("genai_bench.cli.utils.logger")
+    @patch("gevent.sleep", return_value=None)
+    def test_concurrency_saturation_no_warning_for_non_request_rate(
+        self, mock_sleep, mock_logger, mock_environment
+    ):
+        """Test no warning for non-request_rate iteration types."""
+        max_concurrency = 100
+        user_count = 100  # At max
+
+        mock_environment.runner.user_count = user_count
+        mock_requests1 = PropertyMock(side_effect=[10, 20, 30])
+        type(mock_environment.runner.stats.total).num_requests = mock_requests1
+
+        # Test with num_concurrency iteration type
+        manage_run_time(
+            max_time_per_run=3,
+            max_requests_per_run=1000,
+            environment=mock_environment,
+            iteration_type="num_concurrency",
+            target_rate=None,
+            max_concurrency=max_concurrency,
+        )
+
+        mock_logger.warning.assert_not_called()
+
+        # Reset for second test
+        mock_logger.reset_mock()
+        mock_requests2 = PropertyMock(side_effect=[10, 20, 30])
+        type(mock_environment.runner.stats.total).num_requests = mock_requests2
+
+        # Test with batch_size iteration type
+        manage_run_time(
+            max_time_per_run=3,
+            max_requests_per_run=1000,
+            environment=mock_environment,
+            iteration_type="batch_size",
+            target_rate=None,
+            max_concurrency=max_concurrency,
+        )
+
+        # Still no warning
+        mock_logger.warning.assert_not_called()
+
+    @patch("genai_bench.cli.utils.logger")
+    @patch("gevent.sleep", return_value=None)
+    def test_concurrency_saturation_no_warning_when_max_concurrency_none(
+        self, mock_sleep, mock_logger, mock_environment
+    ):
+        """Test no warning when max_concurrency is None."""
+        user_count = 100
+        target_rate = 10.0
+
+        mock_environment.runner.user_count = user_count
+        mock_requests = PropertyMock(side_effect=[10, 20, 30])
+        type(mock_environment.runner.stats.total).num_requests = mock_requests
+
+        manage_run_time(
+            max_time_per_run=3,
+            max_requests_per_run=1000,
+            environment=mock_environment,
+            iteration_type="request_rate",
+            target_rate=target_rate,
+            max_concurrency=None,
+        )
+
+        mock_logger.warning.assert_not_called()
