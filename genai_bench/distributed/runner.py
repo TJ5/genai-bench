@@ -449,6 +449,8 @@ class DistributedRunner:
     def update_rate_limiter(self, rate: float) -> None:
         """Update rate limiter on all nodes"""
         if self.environment.runner:
+            if rate is None or rate <= 0:
+                self._rate_limiter_stop_confirmations = 0
             self.environment.runner.send_message("update_rate_limiter", rate)
 
     def _handle_batch_size_update(self, environment: Environment, msg: Any) -> None:
@@ -507,8 +509,6 @@ class DistributedRunner:
 
         expected = expected_workers or self.config.num_workers
         start_time = time.monotonic()
-        self._rate_limiter_stop_confirmations = 0
-
         while time.monotonic() - start_time < timeout:
             if self._rate_limiter_stop_confirmations >= expected:
                 logger.debug(f"All {expected} workers confirmed rate limiter stop")
