@@ -321,13 +321,13 @@ class AggregatedMetricsCollector:
             window_seconds: Time window to calculate rate over
 
         Returns:
-            Dict with actual_rate, target_rate, and is_below_threshold
+            Dict with actual_rate, target_rate, and is_outside_range
         """
         if not self._send_timestamps or len(self._send_timestamps) < 2:
             return {
                 "actual_rate": None,
                 "target_rate": self._target_rate,
-                "is_below_threshold": False,
+                "is_outside_range": False,
             }
 
         # Sort timestamps (they may arrive out of order in distributed mode)
@@ -342,7 +342,7 @@ class AggregatedMetricsCollector:
             return {
                 "actual_rate": None,
                 "target_rate": self._target_rate,
-                "is_below_threshold": False,
+                "is_outside_range": False,
             }
 
         # Calculate rate: (count - 1) / time_span
@@ -351,20 +351,22 @@ class AggregatedMetricsCollector:
             return {
                 "actual_rate": None,
                 "target_rate": self._target_rate,
-                "is_below_threshold": False,
+                "is_outside_range": False,
             }
 
         actual_rate = (len(recent_timestamps) - 1) / time_span
 
-        # Check if below threshold (>3% below target)
-        is_below = False
+        # Check if outside acceptable range (>3% deviation from target)
+        is_outside_range = False
         if self._target_rate and self._target_rate > 0:
-            is_below = actual_rate < self._target_rate * 0.97
+            lower_bound = self._target_rate * 0.97
+            upper_bound = self._target_rate * 1.03
+            is_outside_range = actual_rate < lower_bound or actual_rate > upper_bound
 
         return {
             "actual_rate": actual_rate,
             "target_rate": self._target_rate,
-            "is_below_threshold": is_below,
+            "is_outside_range": is_outside_range,
         }
 
     def save(self, file_path: str, metrics_time_unit: str = "s"):

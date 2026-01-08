@@ -17,6 +17,9 @@ def manage_run_time(
     max_time_per_run: int,
     max_requests_per_run: int,
     environment: Environment,
+    iteration_type: Optional[str] = None,
+    target_rate: Optional[float] = None,
+    max_concurrency: Optional[int] = None,
 ) -> int:
     """
     Manages the run time of the benchmarking process by tracking elapsed time
@@ -26,17 +29,26 @@ def manage_run_time(
     2. The total number of requests exceeds the maximum requests per run
        (`max_requests_per_run`).
 
+    For request_rate runs, also monitors concurrency saturation and logs
+    warnings if max_concurrency is hit (indicating target rate may not be
+    achievable).
+
     Args:
         max_time_per_run (int): The maximum allowed run time in seconds.
         max_requests_per_run (int): The maximum number of requests per
             run.
         environment: The environment object with runner stats.
+        iteration_type: Optional iteration type ('request_rate', 'num_concurrency',
+            or 'batch_size').
+        target_rate: Optional target request rate (only for request_rate mode).
+        max_concurrency: Optional max concurrency limit (only for request_rate mode).
 
     Returns:
         int: The actual run time in seconds.
     """
 
     total_run_time = 0
+    last_saturation_warning_time = 0
 
     while total_run_time < max_time_per_run:
         gevent.sleep(1)
@@ -44,6 +56,23 @@ def manage_run_time(
 
         assert environment.runner is not None, "environment.runner should not be None"
         total_completed_requests = environment.runner.stats.total.num_requests
+
+        # Check for concurrency saturation in request_rate mode
+        if iteration_type == "request_rate" and max_concurrency:
+            user_count = environment.runner.user_count
+            # Warn if at or near max concurrency (95% threshold)
+            # Rate-limit warnings to once every 10 seconds
+            if (
+                user_count >= max_concurrency * 0.95
+                and total_run_time - last_saturation_warning_time >= 10
+            ):
+                logger.warning(
+                    f"Concurrency saturation: {user_count}/{max_concurrency} "
+                    f"users busy. Target rate of {target_rate} req/s may not be "
+                    f"achievable. Consider increasing --max-concurrency or "
+                    f"reducing --request-rate."
+                )
+                last_saturation_warning_time = total_run_time
 
         if total_completed_requests >= max_requests_per_run:
             logger.info(

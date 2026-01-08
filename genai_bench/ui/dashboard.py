@@ -343,7 +343,7 @@ class RichLiveDashboard:
 
         actual_rate = rate_info.get("actual_rate")
         target_rate = rate_info.get("target_rate")
-        is_below = rate_info.get("is_below_threshold", False)
+        is_outside_range = rate_info.get("is_outside_range", False)
 
         if actual_rate is None or target_rate is None:
             return
@@ -352,14 +352,20 @@ class RichLiveDashboard:
         if now - self._last_rate_warning_time < 10.0:
             return
 
-        deviation = (target_rate - actual_rate) / target_rate
+        deviation_pct = abs(actual_rate - target_rate) / target_rate * 100
 
-        if is_below:
-            # Rate is bad (>3% below target)
-            logger.warning(
-                f"Rate warning: actual send rate {actual_rate:.1f} req/s "
-                f"is {deviation:.1%} below target {target_rate:.1f} req/s"
-            )
+        if is_outside_range:
+            # Rate is bad (>3% deviation from target)
+            if actual_rate < target_rate:
+                logger.warning(
+                    f"Rate warning: actual send rate {actual_rate:.1f} req/s "
+                    f"is {deviation_pct:.1f}% below target {target_rate:.1f} req/s"
+                )
+            else:
+                logger.warning(
+                    f"Rate warning: actual send rate {actual_rate:.1f} req/s "
+                    f"is {deviation_pct:.1f}% above target {target_rate:.1f} req/s"
+                )
         else:
             # Rate is good (within 3%)
             logger.info(

@@ -501,6 +501,11 @@ def benchmark(
                     max_time_per_run=max_time_per_run,
                     max_requests_per_run=max_requests_per_run,
                     environment=environment,
+                    iteration_type=iteration_type,
+                    target_rate=iteration if iteration_type == "request_rate" else None,
+                    max_concurrency=concurrency
+                    if iteration_type == "request_rate"
+                    else None,
                 )
 
                 # For request_rate runs, stop the rate limiter to clean up
