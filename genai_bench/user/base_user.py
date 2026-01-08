@@ -43,6 +43,7 @@ class BaseUser(HttpUser):
             self._send_timestamp = time.monotonic()
         else:
             self._send_timestamp = None
+
         return True
 
     @classmethod
