@@ -313,7 +313,7 @@ class AggregatedMetricsCollector:
         """Set the target request rate for monitoring."""
         self._target_rate = rate
 
-    def get_send_rate_info(self, window_seconds: float = 5.0) -> dict:
+    def get_send_rate_info(self, window_seconds: float = 10.0) -> dict:
         """
         Calculate actual send rate over a rolling window.
 
@@ -345,16 +345,8 @@ class AggregatedMetricsCollector:
                 "is_outside_range": False,
             }
 
-        # Calculate rate: (count - 1) / time_span
-        time_span = recent_timestamps[-1] - recent_timestamps[0]
-        if time_span <= 0:
-            return {
-                "actual_rate": None,
-                "target_rate": self._target_rate,
-                "is_outside_range": False,
-            }
-
-        actual_rate = (len(recent_timestamps) - 1) / time_span
+        # Calculate rate: count / window_seconds
+        actual_rate = len(recent_timestamps) / window_seconds
 
         # Check if outside acceptable range (>3% deviation from target)
         is_outside_range = False
