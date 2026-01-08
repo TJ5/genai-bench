@@ -173,7 +173,7 @@ genai-bench benchmark \
             --task text-to-text \
             --max-time-per-run 10 \
             --max-requests-per-run 300 \
-            --request-rate 1.0 --request-rate 5.0 --request-rate 10.0 --request-rate 20.0 \
+            --request-rate 1 --request-rate 5 --request-rate 10 --request-rate 20 \
             --traffic-scenario "N(480,240)/(300,150)" --traffic-scenario "D(100,100)"
 ```
 
@@ -181,7 +181,7 @@ When using `--request-rate`, the benchmark automatically uses request rate itera
 
 **Concurrency and Spawn Rate**: For request rate runs, maximum concurrency defaults to 5000 to ensure sufficient workers are available, but can be overridden with `--max-concurrency`. The spawn rate defaults to the maximum concurrency value unless otherwise specified with `--spawn-rate`. You can override the spawn rate using `--spawn-rate` if needed, but this is generally not recommended as it may affect rate limiting accuracy.
 
-**Note**: In distributed mode (when using `--num-workers`), the target request rate is automatically divided among all workers. For example, with `--request-rate 20.0` and `--num-workers 4`, each worker will target 5.0 requests/second. If the per-worker rate is very low (< 0.1 req/s), a warning will be displayed suggesting fewer workers or a higher target rate for better accuracy.
+**Note**: In distributed mode (when using `--num-workers`), the target request rate is automatically divided among all workers. For example, with `--request-rate 20` and `--num-workers 4`, each worker will target 5 requests/second. If the per-worker rate is very low (< 0.1 req/s), a warning will be displayed suggesting fewer workers or a higher target rate for better accuracy.
 
 ### Notes on benchmark duration
 
