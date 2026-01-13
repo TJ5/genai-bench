@@ -1,5 +1,5 @@
 import json
-from typing import List, Optional, Union
+from typing import List, Optional
 
 import numpy as np
 
@@ -271,7 +271,7 @@ class AggregatedMetricsCollector:
 
     def set_run_metadata(
         self,
-        iteration: Union[int, float],
+        iteration: int,
         scenario_str: str,
         iteration_type: str = "num_concurrency",
     ):
