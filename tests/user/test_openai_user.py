@@ -796,6 +796,84 @@ def test_chat_with_reasoning_content_and_token_estimation(
 
 
 @patch("genai_bench.user.openai_user.requests.post")
+def test_chat_with_reasoning_field_and_token_estimation(
+    mock_post,
+    mock_openai_user,
+    caplog,
+):
+    """
+    Same as reasoning_content test, but using new `reasoning` field.
+    Ensures TTFT, generated_text, and token estimation behave correctly.
+    """
+    mock_openai_user.on_start()
+    mock_openai_user.sample = lambda: UserChatRequest(
+        model="gpt-oss-20b-h100-chat",
+        prompt="Why is the sky blue?",
+        num_prefill_tokens=5,
+        additional_request_params={},
+        max_tokens=20,
+    )
+
+    reasoning_text = "Thinking..."
+    final_text = "The sky is blue"
+    combined_text = reasoning_text + final_text
+
+    mock_openai_user.environment.sampler = MagicMock()
+    mock_openai_user.environment.sampler.get_token_length.side_effect = [
+        len(combined_text),
+        len(reasoning_text),
+    ]
+
+    response_mock = MagicMock()
+    response_mock.status_code = 200
+    response_mock.iter_lines = MagicMock(
+        return_value=[
+            (
+                b'data: {"id": "chat-yyy", "choices": [{"delta": '
+                b'{"reasoning": "Thinking..."}, "index": 0}], '
+                b'"model": "gpt-oss-llama-3"}'
+            ),
+            (
+                b'data: {"id": "chat-yyy", "choices": [{"delta": '
+                b'{"content": "The sky is blue"}, "index": 0}], '
+                b'"model": "gpt-oss-llama-3"}'
+            ),
+            (
+                b'data: {"id": "chat-yyy", "choices": [{"delta": {}, '
+                b'"finish_reason": "stop"}]}'
+            ),
+            b"data: [DONE]",
+        ]
+    )
+
+    mock_post.return_value = response_mock
+
+    with caplog.at_level(logging.WARNING):
+        resp = mock_openai_user.send_request(
+            stream=True,
+            endpoint="/v1/test",
+            payload={"key": "value"},
+            num_prefill_tokens=5,
+            parse_strategy=mock_openai_user.parse_chat_response,
+        )
+
+    assert isinstance(resp, UserChatResponse)
+    assert resp.status_code == 200
+    assert resp.time_at_first_token is not None
+    assert resp.generated_text == combined_text
+    assert "There is no usage info returned from the model server" in caplog.text
+    assert resp.tokens_received == len(combined_text)
+    assert resp.reasoning_tokens == len(reasoning_text)
+    assert mock_openai_user.environment.sampler.get_token_length.call_count == 2
+    mock_openai_user.environment.sampler.get_token_length.assert_any_call(
+        combined_text, add_special_tokens=False
+    )
+    mock_openai_user.environment.sampler.get_token_length.assert_any_call(
+        reasoning_text, add_special_tokens=False
+    )
+
+
+@patch("genai_bench.user.openai_user.requests.post")
 def test_reasoning_tokens_backfill_when_usage_zero_and_reasoning_content(
     mock_post, mock_openai_user, caplog
 ):
@@ -818,6 +896,60 @@ def test_reasoning_tokens_backfill_when_usage_zero_and_reasoning_content(
         return_value=[
             b'data: {"choices":[{"delta":{"reasoning_content":"Think."},"finish_reason":null}]}',  # noqa:E501
             b'data: {"choices":[{"delta":{"content":"Done."},"finish_reason":null}]}',
+            b'data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7,"completion_tokens_details":{"reasoning_tokens":0}}}',  # noqa:E501
+            b"data: [DONE]",
+        ]
+    )
+    mock_post.return_value = response_mock
+
+    with caplog.at_level(logging.WARNING):
+        response = mock_openai_user.send_request(
+            stream=True,
+            endpoint="/v1/test",
+            payload={"key": "value"},
+            num_prefill_tokens=5,
+            parse_strategy=mock_openai_user.parse_chat_response,
+        )
+
+    assert response.status_code == 200
+    assert response.generated_text == "Think.Done."
+    assert response.reasoning_tokens == 6
+    assert response.tokens_received == 2
+    mock_openai_user.environment.sampler.get_token_length.assert_called_once_with(
+        reasoning_only, add_special_tokens=False
+    )
+    assert (
+        "Server did not report reasoning_tokens. Estimated reasoning_tokens "
+        "based on the model tokenizer" in caplog.text
+    )
+
+
+@patch("genai_bench.user.openai_user.requests.post")
+def test_reasoning_tokens_backfill_when_usage_zero_and_reasoning_field(
+    mock_post, mock_openai_user, caplog
+):
+    """Backfill when usage has reasoning_tokens=0 and stream has `reasoning`."""
+    mock_openai_user.on_start()
+    mock_openai_user.sample = lambda: UserChatRequest(
+        model="gpt-3",
+        prompt="Think then answer.",
+        num_prefill_tokens=5,
+        additional_request_params={},
+        max_tokens=10,
+    )
+    reasoning_only = "Think."
+    mock_openai_user.environment.sampler = MagicMock()
+    mock_openai_user.environment.sampler.get_token_length.return_value = 6
+
+    response_mock = MagicMock()
+    response_mock.status_code = 200
+    response_mock.iter_lines = MagicMock(
+        return_value=[
+            (
+                b'data: {"choices":[{"delta":{"reasoning":"Think."},'
+                b'"finish_reason":null}]}'
+            ),
+            (b'data: {"choices":[{"delta":{"content":"Done."},"finish_reason":null}]}'),
             b'data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7,"completion_tokens_details":{"reasoning_tokens":0}}}',  # noqa:E501
             b"data: [DONE]",
         ]

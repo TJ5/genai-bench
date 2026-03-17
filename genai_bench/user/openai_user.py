@@ -364,8 +364,15 @@ class OpenAIUser(BaseUser):
 
             try:
                 delta = data["choices"][0]["delta"]
-                content = delta.get("content") or delta.get("reasoning_content")
-                reasoning_content_chunk = delta.get("reasoning_content")
+                # New vLLM uses "reasoning" field
+                content = (
+                    delta.get("content")
+                    or delta.get("reasoning_content")
+                    or delta.get("reasoning")
+                )
+                reasoning_content_chunk = delta.get("reasoning_content") or delta.get(
+                    "reasoning"
+                )
                 usage = delta.get("usage")
 
                 if usage:
